@@ -112,6 +112,14 @@ export const Home = () => {
     setBooks((bs) => bs.filter((b) => b.filename !== filename));
   }, []);
 
+  // То же с полкой: книга из библиотеки никуда не делась, поменялась только
+  // отметка — и в разделе «мои книги» она сама пропадёт из выдачи.
+  const onShelf = useCallback((filename, mine) => {
+    setBooks((bs) =>
+      bs.map((b) => (b.filename === filename ? { ...b, mine } : b)),
+    );
+  }, []);
+
   if (loading) return <Loading />;
 
   return (
@@ -143,6 +151,7 @@ export const Home = () => {
       <BooksList
         books={shownBooks}
         onDeleted={onDeleted}
+        onShelf={onShelf}
       />
       {tab === "library" && (
         <SourceResults

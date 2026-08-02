@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
 
-export const BooksList = ({ books, onDeleted }) => {
+export const BooksList = ({ books, onDeleted, onShelf }) => {
   const navigate = useNavigate();
 
   const [isEnter, setEnter] = useState(null);
@@ -25,6 +25,26 @@ export const BooksList = ({ books, onDeleted }) => {
       onDeleted(book.filename);
     } catch (e) {
       setError(e.response?.data?.message ?? "Не удалось удалить книгу");
+    }
+  };
+
+  // Полка — не права: отложить себе можно любую книгу из библиотеки,
+  // и на саму книгу это никак не влияет. Поэтому и подтверждения нет:
+  // передумать — это тот же клик обратно.
+  const shelve = async (book) => {
+    const mine = !book.mine;
+    try {
+      await axios({
+        method: mine ? "post" : "delete",
+        url: `/api/myBooks/${book.filename}`,
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setError(null);
+      onShelf(book.filename, mine);
+      // подробности открыты по этой же книге — отметку в них тоже поправить
+      setDetails((d) => (d && d.id === book.id ? { ...d, mine } : d));
+    } catch (e) {
+      setError(e.response?.data?.message ?? "Не удалось изменить «мои книги»");
     }
   };
 
@@ -64,6 +84,19 @@ export const BooksList = ({ books, onDeleted }) => {
                     Подробнее
                   </button>
                 )}
+                {/* Видно всегда, а не по наведению: по этой отметке и понятно,
+                    какие книги у читателя свои. */}
+                <button
+                  className={`shelfButton ${book.mine ? "on" : ""}`}
+                  title={book.mine ? "Убрать из моих книг" : "В мои книги"}
+                  aria-pressed={book.mine}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    shelve(book);
+                  }}
+                >
+                  {book.mine ? "★" : "☆"}
+                </button>
               </div>
             </li>
           ))}
@@ -76,6 +109,7 @@ export const BooksList = ({ books, onDeleted }) => {
           book={details}
           onClose={() => setDetails(null)}
           onDelete={remove}
+          onShelf={shelve}
         />
       )}
     </div>

@@ -19,7 +19,7 @@ const published = (v) => {
 
 // Нативный <dialog>: Esc, подложка, фокус внутри окна и inert для остальной
 // страницы — всё это браузер делает сам. Своего кода на это нет.
-export const BookDetails = ({ book, onClose, onDelete }) => {
+export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -91,6 +91,11 @@ export const BookDetails = ({ book, onClose, onDelete }) => {
 
         <div className="detailsActions">
           <button onClick={() => ref.current.close()}>Закрыть</button>
+          {/* Убрать с полки — не то же самое, что удалить: книга остаётся
+              в библиотеке, поэтому и кнопка обычная, без предупреждения. */}
+          <button onClick={() => onShelf(book)}>
+            {book.mine ? "Убрать из моих" : "В мои книги"}
+          </button>
           {book.canDelete && (
             <button
               className="deleteBook"

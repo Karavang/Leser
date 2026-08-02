@@ -32,6 +32,8 @@ pub struct Book {
     /// заполнен у книг, принесённых из внешнего источника; для своих загрузок null
     source_url: Option<String>,
     created_at: DateTime<Utc>,
+    /// книга лежит на полке у того, кто спрашивает («мои книги»)
+    on_shelf: bool,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -43,8 +45,12 @@ pub struct Book {
 pub const BOOK_EXTS: [&str; 3] = ["epub", "fb2", "rda"];
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
-     b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by";
-const BOOK_FROM: &str = "from books b left join users u on u.id = b.owner_id";
+     b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
+     (s.user_id is not null) as on_shelf";
+/// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
+const BOOK_FROM: &str = "from books b
+     left join users u on u.id = b.owner_id
+     left join shelf s on s.book_id = b.id and s.user_id = $1";
 
 /// Название, автор и серия одной строкой: искать надо по всем трём сразу,
 /// а слово из запроса может лежать в любом.
@@ -80,10 +86,14 @@ impl Book {
     /// Форма ответа как у старого Node-бэка: filename собирается из id и ext.
     /// `mine`/`canDelete` считает сервер — фронт не должен знать правила прав.
     ///
+    /// `mine` — про полку читателя, `canDelete` — про то, кто книгу принёс.
+    /// Это разные вещи: чужую книгу можно отложить себе, но удалить из
+    /// библиотеки её нельзя, а свою можно убрать с полки, не удаляя.
+    ///
     /// `source`/`addedAt` — про то, откуда книга взялась, а не про произведение;
     /// на карточке им не место, фронт показывает их только в подробностях.
     fn to_json(&self, user: &AuthUser) -> serde_json::Value {
-        let mine = self.owner_id == Some(user.id);
+        let owner = self.owner_id == Some(user.id);
 
         // Источник — одно понятие на два случая: либо читатель, который принёс
         // файл, либо адрес, откуда книгу забрали. Ссылка есть только у второго.
@@ -112,8 +122,8 @@ impl Book {
             "sourceUrl": self.source_url,
             // rfc3339, чтобы фронт отформатировал под локаль читателя сам
             "addedAt": self.created_at.to_rfc3339(),
-            "mine": mine,
-            "canDelete": mine || user.admin,
+            "mine": self.on_shelf,
+            "canDelete": owner || user.admin,
         })
     }
 }
@@ -176,7 +186,7 @@ pub async fn get_all(
         q.variants
             .iter()
             .enumerate()
-            .map(|(i, _)| all_words_match(&format!("${}", i + 1)))
+            .map(|(i, _)| all_words_match(&format!("${}", i + 2)))
             .collect::<Vec<_>>()
             .join(" or ")
     };
@@ -187,7 +197,7 @@ pub async fn get_all(
     // sql отдельной переменной: запрос одалживает строку, а временная из
     // format! умерла бы концом этого же выражения.
     let sql = format!("select {BOOK_COLS} {BOOK_FROM} where ({filter}) order by b.created_at desc");
-    let mut query = sqlx::query_as::<_, Book>(&sql);
+    let mut query = sqlx::query_as::<_, Book>(&sql).bind(user.id);
     for words in &q.variants {
         query = query.bind(words);
     }
@@ -449,6 +459,14 @@ async fn store_book(
         .bind(&doc)
         .execute(&mut *tx)
         .await?;
+
+    // Кто книгу принёс, у того она сразу и в «моих»: отдельно откладывать
+    // себе только что загруженную книгу — лишний шаг.
+    sqlx::query("insert into shelf (user_id, book_id) values ($1, $2)")
+        .bind(owner)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     Ok(format!("{id}.{ext}"))
@@ -591,6 +609,54 @@ pub async fn delete_one(
     ))
 }
 
+/// Отложить книгу себе. Полка не про права: отложить можно любую книгу
+/// из библиотеки, и на саму книгу это никак не влияет.
+pub async fn add_to_my(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(filename): Path<String>,
+) -> Result<StatusCode> {
+    let (book_id, _) = parse_filename(&filename)?;
+
+    // Повторное добавление — не ошибка: кнопку могли нажать дважды или
+    // из двух окон сразу.
+    sqlx::query(
+        "insert into shelf (user_id, book_id) values ($1, $2)
+         on conflict (user_id, book_id) do nothing",
+    )
+    .bind(user.id)
+    .bind(book_id)
+    .execute(&state.db)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(d) if d.is_foreign_key_violation() => {
+            AppError::new(StatusCode::NOT_FOUND, "Not found")
+        }
+        e => e.into(),
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Убрать книгу со своей полки. Из библиотеки она никуда не девается —
+/// это разные действия, и удаление живёт в `delete_one`.
+pub async fn remove_from_my(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(filename): Path<String>,
+) -> Result<StatusCode> {
+    let (book_id, _) = parse_filename(&filename)?;
+
+    sqlx::query("delete from shelf where user_id = $1 and book_id = $2")
+        .bind(user.id)
+        .bind(book_id)
+        .execute(&state.db)
+        .await?;
+
+    // Книги на полке и так нет — значит, всё как просили.
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Deserialize)]
 pub struct FlipBody {
     filename: String,
@@ -629,10 +695,12 @@ pub async fn page_was_flipped(
 mod tests {
     use super::*;
 
+    /// «Моя книга» и «моя, чтобы удалить» — разные вещи, и путать их нельзя:
+    /// на полке может лежать чужая книга, а своя — не лежать.
     #[test]
-    fn ownership_flags() {
+    fn shelf_and_ownership_are_separate() {
         let me = Uuid::new_v4();
-        let book = |owner: Option<Uuid>| Book {
+        let book = |owner: Option<Uuid>, on_shelf: bool| Book {
             id: Uuid::new_v4(),
             title: "t".into(),
             author: "a".into(),
@@ -645,21 +713,27 @@ mod tests {
             added_by: owner.map(|_| "vasya".into()),
             created_at: Utc::now(),
             source_url: None,
+            on_shelf,
         };
         let user = |admin| AuthUser { id: me, admin };
 
-        let mine = book(Some(me)).to_json(&user(false));
+        let mine = book(Some(me), true).to_json(&user(false));
         assert_eq!(mine["mine"], true);
         assert_eq!(mine["canDelete"], true);
 
-        // чужую книгу удаляет только админ
-        let theirs = book(Some(Uuid::new_v4()));
-        assert_eq!(theirs.to_json(&user(false))["canDelete"], false);
-        assert_eq!(theirs.to_json(&user(true))["canDelete"], true);
-        assert_eq!(theirs.to_json(&user(false))["mine"], false);
+        // свою книгу убрали с полки — удалять её всё ещё можно
+        let put_away = book(Some(me), false).to_json(&user(false));
+        assert_eq!(put_away["mine"], false);
+        assert_eq!(put_away["canDelete"], true);
+
+        // чужая книга на своей полке: читать — да, удалять — нет
+        let borrowed = book(Some(Uuid::new_v4()), true);
+        assert_eq!(borrowed.to_json(&user(false))["mine"], true);
+        assert_eq!(borrowed.to_json(&user(false))["canDelete"], false);
+        assert_eq!(borrowed.to_json(&user(true))["canDelete"], true);
 
         // владелец удалил аккаунт: книга ничья, но админ её всё ещё сносит
-        let orphan = book(None);
+        let orphan = book(None, false);
         assert_eq!(orphan.to_json(&user(false))["mine"], false);
         assert_eq!(orphan.to_json(&user(false))["canDelete"], false);
         assert_eq!(orphan.to_json(&user(true))["canDelete"], true);

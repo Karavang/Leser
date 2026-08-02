@@ -155,6 +155,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(books::put_new_one).layer(DefaultBodyLimit::max(MAX_UPLOAD)),
         )
         .route("/pageWasFlipped", post(books::page_was_flipped))
+        .route(
+            "/myBooks/{filename}",
+            post(books::add_to_my).delete(books::remove_from_my),
+        )
         .route("/booksInRead", get(books::books_in_read))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
