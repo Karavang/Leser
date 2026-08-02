@@ -1,0 +1,40 @@
+[package]
+name = "leser-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "macros",
+] }
+# rustls, а не native-tls: тот же стек, что у sqlx, и в distroless-образе
+# не нужен ни openssl, ни системные сертификаты.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls-webpki-roots", "json", "charset",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+jsonwebtoken = "9"
+argon2 = "0.5"
+epub = "2"
+quick-xml = { version = "0.37", features = ["encoding"] }
+# Обе уже едут транзитивно (jsonwebtoken и reqwest): картинки книги уходят
+# в читалку data-URI, а адреса внутри epub записаны с процентами.
+base64 = "0.22"
+percent-encoding = "2"
+# Распаковка .rda: R жмёт их gzip, bzip2 или xz — какой именно, видно по
+# сигнатуре файла, поэтому нужны все три.
+flate2 = "1"
+bzip2 = "0.5"
+liblzma = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

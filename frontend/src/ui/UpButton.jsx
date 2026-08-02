@@ -1,0 +1,25 @@
+const UpButton = () => {
+  return (
+    <div
+      className="upButton"
+      onClick={() => {
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+      }}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        height="40px"
+        viewBox="0 -960 960 960"
+        width="40px"
+        fill="#000"
+      >
+        <path d="M446.67-160v-513l-240 240L160-480l320-320 320 320-46.67 47-240-240v513h-66.66Z" />
+      </svg>
+    </div>
+  );
+};
+
+export default UpButton;

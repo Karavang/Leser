@@ -1,0 +1,56 @@
+# Проверки на каждый push и PR. Три независимые джобы бегут параллельно:
+# упавший фронт не скрывает результат по бэку.
+#
+# Docker-образы собираются здесь только чтобы поймать сломанный Dockerfile —
+# никуда не пушатся. Понадобится деплой — добавить login в registry и push
+# с тегом ${{ github.sha }} отдельной джобой с `needs: [api, frontend]`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      # Кэш ~/.cargo и target/: без него каждый прогон пересобирает все крейты.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: api
+      - run: cargo fmt --check
+        working-directory: api
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: api
+      - run: cargo test
+        working-directory: api
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # ci, а не install: ставит ровно то, что в lock-файле, и падает при расхождении
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
+        env:
+          JWT_SECRET: ci-not-a-real-secret
