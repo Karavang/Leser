@@ -9,6 +9,7 @@ import UserButton from "./components/UserButton";
 import UpButton from "./ui/UpButton";
 import { Loading } from "./ui/Loading";
 import { clearSession } from "./session";
+import { t } from "./i18n";
 
 export const Home = () => {
   const [books, setBooks] = useState([]);
@@ -138,13 +139,13 @@ export const Home = () => {
             className={tab === "library" ? "active" : ""}
             onClick={() => setTab("library")}
           >
-            Библиотека
+            {t("tabLibrary")}
           </button>
           <button
             className={tab === "mine" ? "active" : ""}
             onClick={() => setTab("mine")}
           >
-            Мои книги
+            {t("tabMine")}
           </button>
         </div>
       </div>

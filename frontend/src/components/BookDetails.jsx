@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -43,19 +44,19 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
         <dl>
           {book.series && (
             <>
-              <dt>Серия</dt>
+              <dt>{t("series")}</dt>
               <dd>{book.series}</dd>
             </>
           )}
           {book.date && (
             <>
-              <dt>Издана</dt>
+              <dt>{t("published")}</dt>
               <dd>{published(book.date)}</dd>
             </>
           )}
           {book.lang && (
             <>
-              <dt>Язык</dt>
+              <dt>{t("language")}</dt>
               <dd>{book.lang}</dd>
             </>
           )}
@@ -63,7 +64,7 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
               или адрес, откуда её забрали. У внешнего это ссылка. */}
           {book.source && (
             <>
-              <dt>Источник</dt>
+              <dt>{t("source")}</dt>
               <dd>
                 {book.sourceUrl ? (
                   <a
@@ -81,7 +82,7 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
           )}
           {addedAt && (
             <>
-              <dt>Добавлена</dt>
+              <dt>{t("addedAt")}</dt>
               <dd>{addedAt}</dd>
             </>
           )}
@@ -90,18 +91,18 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
         {book.desc && <p className="detailsDesc">{book.desc}</p>}
 
         <div className="detailsActions">
-          <button onClick={() => ref.current.close()}>Закрыть</button>
+          <button onClick={() => ref.current.close()}>{t("close")}</button>
           {/* Убрать с полки — не то же самое, что удалить: книга остаётся
               в библиотеке, поэтому и кнопка обычная, без предупреждения. */}
           <button onClick={() => onShelf(book)}>
-            {book.mine ? "Убрать из моих" : "В мои книги"}
+            {book.mine ? t("shelfRemoveShort") : t("shelfAdd")}
           </button>
           {book.canDelete && (
             <button
               className="deleteBook"
               onClick={() => onDelete(book)}
             >
-              Удалить книгу
+              {t("deleteBook")}
             </button>
           )}
         </div>

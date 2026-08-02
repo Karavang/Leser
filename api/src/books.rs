@@ -42,7 +42,13 @@ pub struct Book {
 ///
 /// `rda` — формат данных R; книги в нём попадаются на GitHub. Читалки под
 /// него нет и не будет: он превращается в fb2 прямо на входе (`store_book`).
-pub const BOOK_EXTS: [&str; 3] = ["epub", "fb2", "rda"];
+///
+/// Чего здесь нет намеренно: `djvu` — это сканы, а не текст, и без djvulibre
+/// из них не достать даже слоя OCR; `kfx` — закрытый формат Amazon, который
+/// в живой природе всегда под DRM. Обоим место в `TODO.md`, а не здесь.
+pub const BOOK_EXTS: [&str; 9] = [
+    "epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html", "rda",
+];
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
@@ -133,18 +139,31 @@ impl Book {
 fn parse_filename(filename: &str) -> Result<(Uuid, String)> {
     let (id, ext) = filename
         .rsplit_once('.')
-        .ok_or_else(|| AppError::bad("Invalid filename"))?;
-    let id: Uuid = id.parse().map_err(|_| AppError::bad("Invalid filename"))?;
+        .ok_or_else(|| AppError::bad("Неверное имя файла", "Invalid filename"))?;
+    let id: Uuid = id
+        .parse()
+        .map_err(|_| AppError::bad("Неверное имя файла", "Invalid filename"))?;
     if ext.is_empty() || !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(AppError::bad("Invalid filename"));
+        return Err(AppError::bad("Неверное имя файла", "Invalid filename"));
     }
     Ok((id, ext.to_lowercase()))
 }
 
+/// Тип для выдачи самого файла книги.
+///
+/// `html` здесь намеренно не `text/html`: файл пришёл от читателя и лежит
+/// на нашем же origin — браузер выполнил бы его скрипты вместе с сессией
+/// того, кто его открыл. Скачивание книги — это скачивание, а не просмотр.
 fn content_type(ext: &str) -> &'static str {
     match ext {
         "epub" => "application/epub+zip",
         "fb2" => "application/x-fictionbook+xml",
+        "pdf" => "application/pdf",
+        "mobi" => "application/x-mobipocket-ebook",
+        "azw3" => "application/vnd.amazon.ebook",
+        // без charset: в файле может лежать и windows-1251
+        "txt" => "text/plain",
+        "md" => "text/markdown",
         _ => "application/octet-stream",
     }
 }
@@ -238,7 +257,8 @@ pub async fn download_one(
     .fetch_optional(&state.db)
     .await?;
 
-    let (data,) = row.ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "File not found"))?;
+    let (data,) = row
+        .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Файл не найден", "File not found"))?;
 
     Ok((
         [
@@ -249,6 +269,9 @@ pub async fn download_one(
                 header::CACHE_CONTROL,
                 "private, max-age=31536000, immutable",
             ),
+            // Тип мы указали сами и угадывать его по содержимому не надо:
+            // иначе браузер найдёт в чужом файле html и покажет его как html.
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
         data,
     ))
@@ -277,6 +300,10 @@ async fn reader_doc(
     tokio::task::spawn_blocking(move || {
         let chapters = crate::reader::chapters(&ext, &bytes)?;
         let mut doc = head;
+        // В txt, pdf и html языку взяться неоткуда — а переносам он нужен.
+        if doc["lang"].is_null() {
+            doc["lang"] = crate::reader::guess_lang(&chapters).into();
+        }
         doc["chapters"] = serde_json::to_value(chapters).map_err(AppError::internal)?;
         serde_json::to_string(&doc).map_err(AppError::internal)
     })
@@ -338,8 +365,8 @@ async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
     .fetch_optional(&state.db)
     .await?;
 
-    let (data, title, author, lang) =
-        row.ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "File not found"))?;
+    let (data, title, author, lang) = row
+        .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Файл не найден", "File not found"))?;
 
     let doc = reader_doc(ext, data.into(), &title, &author, &lang).await?;
     sqlx::query(
@@ -353,8 +380,8 @@ async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
     Ok(doc)
 }
 
-/// Название книги из имени файла. Нужно только для `.rda`: внутри лежат
-/// голые данные, названия там нет вовсе — `philosophers_stone.rda`
+/// Название книги из имени файла — для форматов, где названию внутри просто
+/// негде лежать: `.rda`, `.txt`, чаще всего `.pdf`. `philosophers_stone.rda`
 /// превращается в «Philosophers Stone».
 fn title_from_filename(name: &str) -> String {
     let stem = name
@@ -379,16 +406,24 @@ fn title_from_filename(name: &str) -> String {
 }
 
 /// Расширение из имени файла, если оно вообще из тех, что мы читаем.
+/// Разные имена одного формата сводятся к одному здесь — дальше по коду
+/// про `.htm` и `.markdown` знать уже никому не нужно.
 fn book_ext(name: &str) -> Result<String> {
     let ext = name
         .rsplit_once('.')
         .map(|(_, e)| e.to_lowercase())
         .unwrap_or_default();
+    let ext = match ext.as_str() {
+        "htm" | "xhtml" => "html".to_string(),
+        "markdown" | "mdown" => "md".to_string(),
+        "azw" => "mobi".to_string(),
+        _ => ext,
+    };
     if !BOOK_EXTS.contains(&ext.as_str()) {
-        return Err(AppError::bad(format!(
-            "Only {} are supported",
-            BOOK_EXTS.join(", ")
-        )));
+        return Err(AppError::bad(
+            format!("Библиотека открывает только {}", BOOK_EXTS.join(", ")),
+            format!("Only {} are supported", BOOK_EXTS.join(", ")),
+        ));
     }
     Ok(ext)
 }
@@ -419,7 +454,12 @@ async fn store_book(
         (ext, bytes)
     };
 
-    let meta = crate::parse::metadata(ext, bytes.clone()).await?;
+    let mut meta = crate::parse::metadata(ext, bytes.clone()).await?;
+    // В txt и pdf названию внутри лежать негде, в html его тоже часто нет.
+    // Имя файла — единственное, что о книге вообще известно.
+    if meta.title == crate::parse::UNTITLED {
+        meta.title = title_from_filename(name);
+    }
 
     // Книга разбирается для читалки здесь же, один раз на всю жизнь книги.
     // Заодно это и проверка: то, из чего не достать ни строчки текста, читать
@@ -485,7 +525,8 @@ pub async fn put_new_one(
             break;
         }
     }
-    let (name, bytes) = file.ok_or_else(|| AppError::bad("No file uploaded"))?;
+    let (name, bytes) =
+        file.ok_or_else(|| AppError::bad("Файл не приложен", "No file uploaded"))?;
     let ext = book_ext(&name)?;
 
     let location = store_book(&state, user.id, &ext, &name, bytes, None).await?;
@@ -535,9 +576,12 @@ pub async fn import(
     let url: reqwest::Url = body
         .url
         .parse()
-        .map_err(|_| AppError::bad("Некорректная ссылка"))?;
+        .map_err(|_| AppError::bad("Некорректная ссылка", "Malformed link"))?;
     if !crate::sources::host_allowed(&url) {
-        return Err(AppError::bad("Источник не в списке разрешённых"));
+        return Err(AppError::bad(
+            "Источник не в списке разрешённых",
+            "This source is not on the allowed list",
+        ));
     }
 
     // Расширение берём из адреса; окончательно решает всё равно разбор файла.
@@ -549,23 +593,41 @@ pub async fn import(
         .get(url.clone())
         .send()
         .await
-        .map_err(|e| AppError::bad(format!("Источник не ответил: {e}")))?
+        .map_err(|e| {
+            AppError::bad(
+                format!("Источник не ответил: {e}"),
+                format!("The source did not respond: {e}"),
+            )
+        })?
         .error_for_status()
-        .map_err(|e| AppError::bad(format!("Источник ответил ошибкой: {e}")))?;
+        .map_err(|e| {
+            AppError::bad(
+                format!("Источник ответил ошибкой: {e}"),
+                format!("The source answered with an error: {e}"),
+            )
+        })?;
 
     // Заявленной длине не верим — проверяем и её, и то, что пришло на самом деле.
     if response
         .content_length()
         .is_some_and(|n| n > MAX_UPLOAD as u64)
     {
-        return Err(AppError::bad("Книга больше 64 МБ"));
+        return Err(AppError::bad(
+            "Книга больше 64 МБ",
+            "The book is over 64 MB",
+        ));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| AppError::bad(format!("Не удалось скачать: {e}")))?;
+    let bytes = response.bytes().await.map_err(|e| {
+        AppError::bad(
+            format!("Не удалось скачать: {e}"),
+            format!("Download failed: {e}"),
+        )
+    })?;
     if bytes.len() > MAX_UPLOAD {
-        return Err(AppError::bad("Книга больше 64 МБ"));
+        return Err(AppError::bad(
+            "Книга больше 64 МБ",
+            "The book is over 64 MB",
+        ));
     }
 
     let source = body.page_url.as_deref().unwrap_or(&body.url);
@@ -599,8 +661,8 @@ pub async fn delete_one(
             .fetch_optional(&state.db)
             .await?;
         return Err(match exists {
-            Some(_) => AppError::new(StatusCode::FORBIDDEN, "Not your book"),
-            None => AppError::new(StatusCode::NOT_FOUND, "Not found"),
+            Some(_) => AppError::new(StatusCode::FORBIDDEN, "Это не ваша книга", "Not your book"),
+            None => AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found"),
         });
     }
 
@@ -630,7 +692,7 @@ pub async fn add_to_my(
     .await
     .map_err(|e| match e {
         sqlx::Error::Database(d) if d.is_foreign_key_violation() => {
-            AppError::new(StatusCode::NOT_FOUND, "Not found")
+            AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found")
         }
         e => e.into(),
     })?;
@@ -683,7 +745,7 @@ pub async fn page_was_flipped(
     .await
     .map_err(|e| match e {
         sqlx::Error::Database(d) if d.is_foreign_key_violation() => {
-            AppError::new(StatusCode::NOT_FOUND, "Not found")
+            AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found")
         }
         e => e.into(),
     })?;

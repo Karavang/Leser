@@ -277,11 +277,24 @@ pub fn chapters(ext: &str, bytes: &[u8]) -> Result<Vec<Chapter>> {
     let mut chapters = match ext {
         "fb2" => fb2(bytes),
         "epub" => epub(bytes),
-        _ => Err(AppError::bad("Этот формат читалка не открывает")),
+        "html" => single_html(&decode(bytes, None), &mut |s| data_image(s)),
+        "md" => markdown(bytes),
+        "txt" => Ok(split_headings(plain(&decode(bytes, None), false))),
+        "pdf" => pdf(bytes),
+        "mobi" | "azw3" => crate::mobi::chapters(bytes),
+        _ => Err(AppError::bad(
+            "Этот формат читалка не открывает",
+            "The reader does not open this format",
+        )),
     }?;
     chapters.truncate(MAX_CHAPTERS);
+    // Пустая глава — это не глава: в оглавлении она строка, ведущая никуда.
+    chapters.retain(|c| !c.html.trim().is_empty());
     if chapters.is_empty() {
-        return Err(AppError::bad("В книге не нашлось текста"));
+        return Err(AppError::bad(
+            "В книге не нашлось текста",
+            "No text found in the book",
+        ));
     }
     Ok(chapters)
 }
@@ -476,10 +489,12 @@ fn fb2(bytes: &[u8]) -> Result<Vec<Chapter>> {
     let mut s = Fb2::default();
 
     loop {
-        match reader
-            .read_event_into(&mut buf)
-            .map_err(|e| AppError::bad(format!("Broken fb2: {e}")))?
-        {
+        match reader.read_event_into(&mut buf).map_err(|e| {
+            AppError::bad(
+                format!("Файл fb2 повреждён: {e}"),
+                format!("Broken fb2: {e}"),
+            )
+        })? {
             Event::Start(e) => s.start(&e),
             Event::Empty(e) => {
                 let name = local(e.name().as_ref());
@@ -540,6 +555,32 @@ fn html_rule(name: &str) -> Rule {
     }
 }
 
+/// Теги, которые в html пишут без закрывающего. В xhtml из epub они приходят
+/// самозакрытыми, а в обычном html — нет, и закрывающего можно ждать вечно.
+///
+/// Без этого один `<meta charset>` в `<head>` уводит весь стек на элемент
+/// вперёд: `</head>` закрывает `meta`, `skip` не снимается — и книга целиком
+/// оказывается внутри пропущенного `<head>`.
+fn void(name: &str) -> bool {
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
 struct Xhtml<'a> {
     out: Out,
     title: String,
@@ -570,9 +611,13 @@ impl Xhtml<'_> {
             self.out.anchor(n);
         }
 
-        // <svg><image xlink:href="cover.jpg"/></svg> — обычная обложка в epub
+        // <svg><image xlink:href="cover.jpg"/></svg> — обычная обложка в epub,
+        // recindex — способ mobi сослаться на картинку номером записи
         if name == "img" || name == "image" {
-            if let Some(src) = attr(e, "src").or_else(|| attr(e, "href")) {
+            if let Some(src) = attr(e, "src")
+                .or_else(|| attr(e, "href"))
+                .or_else(|| attr(e, "recindex"))
+            {
                 self.out.image(self.srcs.len());
                 self.srcs.push(src);
             }
@@ -691,11 +736,19 @@ fn xhtml(
     }
 
     loop {
-        match reader
-            .read_event_into(&mut buf)
-            .map_err(|e| AppError::bad(format!("Broken epub: {e}")))?
-        {
-            Event::Start(e) => s.start(&e),
+        match reader.read_event_into(&mut buf).map_err(|e| {
+            AppError::bad(
+                format!("Файл epub повреждён: {e}"),
+                format!("Broken epub: {e}"),
+            )
+        })? {
+            Event::Start(e) => {
+                let name = local(e.name().as_ref());
+                s.start(&e);
+                if void(&name) {
+                    s.end(&name);
+                }
+            }
             Event::Empty(e) => {
                 let name = local(e.name().as_ref());
                 s.start(&e);
@@ -736,8 +789,12 @@ fn resolve(chapter: &Path, href: &str) -> PathBuf {
 }
 
 fn epub(bytes: &[u8]) -> Result<Vec<Chapter>> {
-    let mut doc = epub::doc::EpubDoc::from_reader(std::io::Cursor::new(bytes))
-        .map_err(|e| AppError::bad(format!("Broken epub: {e}")))?;
+    let mut doc = epub::doc::EpubDoc::from_reader(std::io::Cursor::new(bytes)).map_err(|e| {
+        AppError::bad(
+            format!("Файл epub повреждён: {e}"),
+            format!("Broken epub: {e}"),
+        )
+    })?;
 
     // Оглавление ведёт на файлы; сопоставляем по имени файла, чтобы не гадать,
     // от какой папки записан путь в toc и от какой — в списке ресурсов.
@@ -816,6 +873,316 @@ fn epub(bytes: &[u8]) -> Result<Vec<Chapter>> {
         Some((mime, engine.encode(data)))
     });
     Ok(chapters)
+}
+
+// ── книга одним файлом: html, markdown, txt, pdf, mobi ───────────────────
+
+/// Байты в текст. utf-8, если это utf-8; иначе windows-1251 — в нём лежит
+/// половина русских txt и старого html.
+///
+/// ponytail: BOM и две кодировки, без угадывания по частотам. Промахнуться
+/// это может на koi8-r и cp866 — редкость, и лечится ещё одной веткой здесь.
+pub fn decode(bytes: &[u8], hint: Option<&'static encoding_rs::Encoding>) -> String {
+    // BOM — не гипотеза, а факт, поэтому он важнее и объявленной кодировки.
+    if let Some((enc, bom)) = encoding_rs::Encoding::for_bom(bytes) {
+        return enc
+            .decode_without_bom_handling(&bytes[bom..])
+            .0
+            .into_owned();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        // Валидный utf-8 случайным не бывает, поэтому гипотезу проверяем
+        // первой, а объявленную кодировку берём, только когда она не сошлась.
+        Err(_) => hint
+            .unwrap_or(encoding_rs::WINDOWS_1251)
+            .decode_without_bom_handling(bytes)
+            .0
+            .into_owned(),
+    }
+}
+
+/// Язык книги по её же тексту. Нужен ровно одному — переносам: без `lang`
+/// браузер не знает, каким словарём рвать слово, и не рвёт вовсе.
+///
+/// ponytail: кириллица против латиницы, больше ничего. В txt, pdf и html
+/// языку взяться неоткуда, а эти два и покрывают библиотеку; не сошлось —
+/// возвращаем `None`, и переносов просто не будет, как и сейчас.
+pub fn guess_lang(chapters: &[Chapter]) -> Option<&'static str> {
+    let (mut cyr, mut lat) = (0usize, 0usize);
+    for c in chapters
+        .iter()
+        .take(3)
+        .flat_map(|c| c.html.chars())
+        .take(20_000)
+    {
+        match c {
+            'а'..='я' | 'А'..='Я' | 'ё' | 'Ё' => cyr += 1,
+            'a'..='z' | 'A'..='Z' => lat += 1,
+            _ => {}
+        }
+    }
+    // Разметка сама по себе латиница, поэтому решает не большинство,
+    // а заметный перевес — иначе русская книга оказалась бы английской.
+    match () {
+        _ if cyr > lat => Some("ru"),
+        _ if lat > cyr * 4 && lat > 200 => Some("en"),
+        _ => None,
+    }
+}
+
+/// Разметка одним куском — в главы. Тот же разбор, что у epub: html из
+/// чужого файла безопасным не становится оттого, что файл лежит не в zip.
+///
+/// `image` разрешает адрес картинки в байты — у каждого формата по-своему.
+pub(crate) fn single_html(
+    text: &str,
+    image: &mut dyn FnMut(&str) -> Option<(String, String)>,
+) -> Result<Vec<Chapter>> {
+    // Объявление кодировки после перекодировки врёт: текст уже utf-8,
+    // а quick-xml поверил бы ему и разобрал байты второй раз не тем.
+    let text = match text.strip_prefix("<?xml").and_then(|t| t.split_once("?>")) {
+        Some((_, rest)) => rest,
+        None => text,
+    };
+
+    let (html, title, srcs) = xhtml(text.as_bytes(), Path::new(""), 0, &mut Anchors::default())?;
+
+    let mut chapters = split_headings(html);
+    if chapters.len() == 1 && chapters[0].title.is_empty() {
+        chapters[0].title = title;
+    }
+    put_images(&mut chapters, |i| srcs.get(i).and_then(|s| image(s)));
+    Ok(chapters)
+}
+
+/// Книга одним файлом приезжает сплошной разметкой. Делим её по заголовкам —
+/// по самому верхнему уровню, который встречается в ней больше одного раза.
+fn split_headings(html: String) -> Vec<Chapter> {
+    let Some(tag) = ["<h2>", "<h3>"]
+        .into_iter()
+        .find(|t| html.matches(t).count() > 1)
+    else {
+        // делить не по чему: вся книга — одна глава
+        let title = first_heading(&html);
+        return vec![Chapter { title, html }];
+    };
+
+    let mut out = Vec::new();
+    for (i, part) in html.split(tag).enumerate() {
+        // всё до первого заголовка — титул, оглавление, предисловие
+        if i == 0 {
+            if !part.trim().is_empty() {
+                out.push(Chapter {
+                    title: first_heading(part),
+                    html: part.to_string(),
+                });
+            }
+            continue;
+        }
+        out.push(Chapter {
+            title: strip_tags(part.split("</h").next().unwrap_or_default()),
+            html: format!("{tag}{part}"),
+        });
+    }
+    out
+}
+
+/// Текст первого заголовка в куске разметки — когда названия главы больше
+/// взять неоткуда.
+fn first_heading(html: &str) -> String {
+    ["<h2>", "<h3>"]
+        .into_iter()
+        .find_map(|tag| {
+            let at = html.find(tag)?;
+            let rest = &html[at + tag.len()..];
+            Some(strip_tags(rest.split("</h").next().unwrap_or_default()))
+        })
+        .unwrap_or_default()
+}
+
+/// Текст заголовка без разметки: в него мог попасть `<em>` или `<br>`.
+fn strip_tags(html: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    for c in html.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    // &amp; последним: иначе «&amp;lt;» развернулось бы в «<»
+    out.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .trim()
+        .to_string()
+}
+
+/// Плоский текст (txt, pdf) в разметку. Пустая строка делит абзацы, а внутри
+/// абзаца перевод строки — это перенос по ширине исходника, а не новая строка.
+///
+/// `wrapped` — исходник разбит по ширине страницы (pdf): тогда слово,
+/// разорванное дефисом на границе строк, надо собрать обратно. В txt так
+/// делать нельзя — там дефис в конце строки это дефис в слове.
+fn plain(text: &str, wrapped: bool) -> String {
+    let mut out = Out::default();
+    let mut para: Vec<&str> = Vec::new();
+    // пустая строка в хвосте закрывает последний абзац
+    for line in text.lines().chain(std::iter::once("")) {
+        if line.trim().is_empty() {
+            paragraph(&mut out, &para, wrapped);
+            para.clear();
+        } else {
+            para.push(line);
+        }
+    }
+    out.buf
+}
+
+fn paragraph(out: &mut Out, para: &[&str], wrapped: bool) {
+    if para.is_empty() {
+        return;
+    }
+    // Заголовок стоит отдельной строкой; строка внутри абзаца заголовком
+    // не бывает, как бы она ни выглядела.
+    if para.len() == 1 && looks_like_heading(para[0]) {
+        out.open("h2", "");
+        out.text(para[0].trim());
+        out.close("h2");
+        return;
+    }
+
+    let mut s = String::new();
+    for line in para {
+        let line = line.trim();
+        if wrapped && s.ends_with('-') && s[..s.len() - 1].ends_with(char::is_alphabetic) {
+            s.pop();
+        } else if !s.is_empty() {
+            s.push(' ');
+        }
+        s.push_str(line);
+    }
+    out.open("p", "");
+    out.text(&s);
+    out.close("p");
+}
+
+/// Строка, похожая на название главы. В txt и pdf другой разметки нет вовсе,
+/// поэтому узнаём только то, в чём трудно ошибиться.
+///
+/// ponytail: три правила вместо разбора оглавления. Не разделилось — книга
+/// остаётся одной главой и читается ровно так же, только без оглавления.
+fn looks_like_heading(line: &str) -> bool {
+    const WORDS: [&str; 10] = [
+        "глава",
+        "часть",
+        "книга",
+        "пролог",
+        "эпилог",
+        "chapter",
+        "part",
+        "book",
+        "prologue",
+        "epilogue",
+    ];
+
+    let l = line.trim();
+    // Название главы — короткая строка. Длинная — это абзац.
+    if l.is_empty() || l.chars().count() > 60 {
+        return false;
+    }
+
+    let low = l.to_lowercase();
+    if let Some(w) = WORDS.iter().find(|w| low.starts_with(**w)) {
+        let tail = low[w.len()..].trim_start_matches([' ', '.', ':', '№']);
+        // «Глава 7», «Часть II», «Пролог» — да. «Глава семьи молчала» — нет.
+        // Не сошлось — это ещё не приговор: «ГЛАВА ВТОРАЯ» узнается ниже.
+        if tail.is_empty()
+            || tail.starts_with(|c: char| c.is_numeric())
+            || tail.chars().all(|c| "ivxlcdm .".contains(c))
+        {
+            return true;
+        }
+    }
+
+    // «1. Вступление», «2) Методы» — нумерация разделов, обычная в pdf.
+    // Пробел после числа не в счёт: «1941 год был тяжёлым» — не заголовок.
+    let after = l.trim_start_matches(|c: char| c.is_ascii_digit());
+    if after.len() < l.len() && after.starts_with(['.', ')']) {
+        return true;
+    }
+
+    // строка целиком заглавными — способ выделить главу, когда больше нечем
+    let mut letters = false;
+    for c in l.chars() {
+        if c.is_alphabetic() {
+            letters = true;
+            if c.is_lowercase() {
+                return false;
+            }
+        }
+    }
+    letters
+}
+
+/// Картинка, вшитая в сам файл. Только такая и попадает в разметку из html
+/// и markdown: за относительным путём нам идти некуда, а по чужой ссылке
+/// ходить нельзя — это чужой файл говорит нам, куда сходить.
+///
+/// Проверяем строго. Тип только растровый: в svg живёт скрипт. Дальше только
+/// символы base64 — иначе `data:image/png;base64,"><script>` доехал бы
+/// до разметки целиком, кавычкой и всем остальным.
+fn data_image(src: &str) -> Option<(String, String)> {
+    let (kind, b64) = src.strip_prefix("data:image/")?.split_once(";base64,")?;
+    if !matches!(kind, "png" | "jpeg" | "jpg" | "gif" | "webp") {
+        return None;
+    }
+    if b64.is_empty()
+        || !b64
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+    {
+        return None;
+    }
+    Some((format!("image/{kind}"), b64.to_string()))
+}
+
+/// Markdown. Разбор — pulldown-cmark: списки, вложенность, ``` и ссылки это
+/// CommonMark целиком, а не пара строк.
+///
+/// Его вывод всё равно едет через тот же разбор, что и epub: в markdown можно
+/// писать сырой html, и наружу он выходит как есть.
+fn markdown(bytes: &[u8]) -> Result<Vec<Chapter>> {
+    let text = decode(bytes, None);
+    let opts = pulldown_cmark::Options::ENABLE_TABLES
+        | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
+        | pulldown_cmark::Options::ENABLE_FOOTNOTES;
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new_ext(&text, opts));
+    single_html(&html, &mut |s| data_image(s))
+}
+
+/// PDF. Страница там свёрстана намертво, поэтому берём из неё текст и верстаем
+/// заново — иначе на телефоне книгу можно только масштабировать.
+///
+/// ponytail: колонтитулы и номера страниц приезжают вместе с текстом
+/// отдельными абзацами, картинок нет вовсе. Отличать текст от врезки — это
+/// уже про геометрию страницы, и если понадобится, ей место здесь.
+fn pdf(bytes: &[u8]) -> Result<Vec<Chapter>> {
+    // Разбор шрифтов идёт по чужому файлу и на битом может паниковать;
+    // здесь это ошибка формата (400), а не падение задачи (500).
+    let text = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(bytes))
+        .map_err(|_| AppError::bad("Файл pdf повреждён", "Broken pdf"))?
+        .map_err(|e| {
+            AppError::bad(
+                format!("Файл pdf повреждён: {e}"),
+                format!("Broken pdf: {e}"),
+            )
+        })?;
+    Ok(split_headings(plain(&text, true)))
 }
 
 #[cfg(test)]
@@ -1008,9 +1375,147 @@ mod tests {
         assert!(from.contains("наружу"), "{from}");
     }
 
+    /// В txt нет ничего, кроме пустых строк, — из них и надо собрать книгу.
+    #[test]
+    fn txt_becomes_paragraphs_and_chapters() {
+        let ch = chapters(
+            "txt",
+            "Глава 1\n\nПервая строка\nи её продолжение.\n\n\nГЛАВА ВТОРАЯ\n\nЕщё текст.\n"
+                .as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(ch.len(), 2, "{ch:?}");
+        assert_eq!(ch[0].title, "Глава 1");
+        // перевод строки внутри абзаца — перенос по ширине, а не новая строка
+        assert_eq!(
+            ch[0].html,
+            "<h2>Глава 1</h2><p>Первая строка и её продолжение.</p>"
+        );
+        assert_eq!(ch[1].title, "ГЛАВА ВТОРАЯ");
+    }
+
+    /// Заголовок в txt узнаётся только по виду, и ошибиться тут легко:
+    /// лишняя глава на ровном месте портит оглавление всей книги.
+    #[test]
+    fn only_real_headings_start_a_chapter() {
+        for yes in ["Глава 7", "ЧАСТЬ II", "Пролог", "1. Вступление", "ЭПИЛОГ"]
+        {
+            assert!(looks_like_heading(yes), "{yes}");
+        }
+        for no in [
+            "Глава семьи молчала весь вечер",
+            "1941 год был тяжёлым",
+            "обычная строка текста",
+            "",
+            &"ОЧЕНЬ ДЛИННАЯ СТРОКА ЗАГЛАВНЫМИ, КОТОРАЯ НА САМОМ ДЕЛЕ ЦЕЛЫЙ АБЗАЦ".repeat(2),
+        ] {
+            assert!(!looks_like_heading(no), "{no}");
+        }
+    }
+
+    /// Русский txt приезжает в windows-1251 чаще, чем хотелось бы.
+    #[test]
+    fn cp1251_is_read_as_well_as_utf8() {
+        let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode("Привет");
+        assert_ne!(bytes.as_ref(), "Привет".as_bytes());
+        assert_eq!(decode(&bytes, None), "Привет");
+        assert_eq!(decode("Привет".as_bytes(), None), "Привет");
+        // BOM важнее догадок
+        assert_eq!(decode(b"\xef\xbb\xbf\xd0\x9e\xd0\xba", None), "Ок");
+    }
+
+    /// В markdown можно писать сырой html — значит, чистить его надо так же,
+    /// как всё остальное, а не доверять генератору разметки.
+    #[test]
+    fn markdown_structure_survives_and_raw_html_does_not() {
+        let ch = chapters(
+            "md",
+            b"# One\n\ntext with *stress*\n\n<script>alert(1)</script>\n\n# Two\n\n- a\n- b\n",
+        )
+        .unwrap();
+
+        assert_eq!(ch.len(), 2, "{ch:?}");
+        assert_eq!(ch[0].title, "One");
+        assert!(ch[0].html.contains("<em>stress</em>"), "{:?}", ch[0]);
+        assert!(!ch[0].html.contains("alert(1)"), "{:?}", ch[0]);
+        assert!(ch[1].html.contains("<li>a</li>"), "{:?}", ch[1]);
+    }
+
+    /// Картинка из html и markdown берётся только та, что лежит в самом файле,
+    /// и только растровая: в svg живёт скрипт, а по чужой ссылке мы не ходим.
+    #[test]
+    fn only_inline_raster_images_are_taken() {
+        assert_eq!(
+            data_image("data:image/png;base64,QUJD"),
+            Some(("image/png".into(), "QUJD".into()))
+        );
+        for bad in [
+            "data:image/svg+xml;base64,QUJD",
+            "data:text/html;base64,QUJD",
+            "data:image/png;base64,\"><script>",
+            "data:image/png;base64,",
+            "https://example.com/pic.png",
+            "pic.png",
+        ] {
+            assert_eq!(data_image(bad), None, "{bad}");
+        }
+
+        let ch = chapters(
+            "html",
+            br#"<html><body><p><img src="data:image/png;base64,QUJD">
+                <img src="https://example.com/x.png"></p></body></html>"#,
+        )
+        .unwrap();
+        let html = &ch[0].html;
+        assert!(html.contains("data:image/png;base64,QUJD"), "{html}");
+        // за чужой картинкой не ходим — тега не остаётся вовсе
+        assert_eq!(html.matches("<img").count(), 1, "{html}");
+    }
+
+    /// В обычном html пустые теги пишут без закрывающего — и если ждать
+    /// закрывающий, один `<meta>` в шапке съедает всю книгу.
+    #[test]
+    fn unclosed_void_tags_do_not_swallow_the_book() {
+        let ch = chapters(
+            "html",
+            "<html><head><meta charset=\"utf-8\"><title>t</title></head>
+             <body><h2>Заголовок</h2><p>Текст<br>дальше</p></body></html>"
+                .as_bytes(),
+        )
+        .unwrap();
+
+        let html = &ch[0].html;
+        assert!(html.contains("<p>Текст<br>дальше</p>"), "{html}");
+        assert!(html.contains("<h2>Заголовок</h2>"), "{html}");
+        // лишних закрывающих не появилось: стек не уехал
+        assert_eq!(html.matches("</p>").count(), 1, "{html}");
+    }
+
+    /// Переносы включаются только по языку, а в txt и pdf его негде взять.
+    #[test]
+    fn language_is_guessed_from_the_text() {
+        let of = |html: &str| {
+            guess_lang(&[Chapter {
+                title: String::new(),
+                html: html.into(),
+            }])
+        };
+        assert_eq!(of("<p>Русский текст книги</p>"), Some("ru"));
+        // разметка сама по себе латиница — перевесить её она не должна
+        assert_eq!(of(&"<p>Текст</p>".repeat(20)), Some("ru"));
+        assert_eq!(
+            of(&"<p>plain english prose here</p>".repeat(20)),
+            Some("en")
+        );
+        assert_eq!(of("<p>123 — 456</p>"), None);
+    }
+
     #[test]
     fn junk_is_an_error_not_a_panic() {
         assert!(chapters("epub", b"not a zip").is_err());
+        assert!(chapters("txt", b"   \n\n  ").is_err()); // текста нет
+        assert!(chapters("pdf", b"%PDF-1.4 and then garbage").is_err());
         assert!(chapters("fb2", b"<FictionBook><body></body>").is_err()); // текста нет
         assert!(chapters("djvu", b"whatever").is_err());
     }

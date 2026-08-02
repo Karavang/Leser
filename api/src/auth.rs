@@ -36,7 +36,8 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self> {
-        let unauthorized = || AppError::new(StatusCode::UNAUTHORIZED, "Not authorized");
+        let unauthorized =
+            || AppError::new(StatusCode::UNAUTHORIZED, "Нужен вход", "Not authorized");
         let token = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -144,13 +145,20 @@ pub async fn registration(
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let email = body.email.trim().to_lowercase();
     if !valid_email(&email) {
-        return Err(AppError::new(StatusCode::CONFLICT, "It isn't email"));
+        return Err(AppError::new(
+            StatusCode::CONFLICT,
+            "Это не почта",
+            "It isn't email",
+        ));
     }
     if body.password.len() < 8 {
-        return Err(AppError::bad("Password must be at least 8 characters"));
+        return Err(AppError::bad(
+            "Пароль должен быть не короче 8 символов",
+            "Password must be at least 8 characters",
+        ));
     }
     if body.username.trim().is_empty() {
-        return Err(AppError::bad("Username is required"));
+        return Err(AppError::bad("Нужно имя", "Username is required"));
     }
 
     let salt = SaltString::generate(&mut OsRng);
@@ -169,9 +177,11 @@ pub async fn registration(
     .await
     .map_err(|e| match e {
         // уникальный индекс на email — гонку двух регистраций ловит БД, не мы
-        sqlx::Error::Database(d) if d.is_unique_violation() => {
-            AppError::new(StatusCode::CONFLICT, "Email is already in use")
-        }
+        sqlx::Error::Database(d) if d.is_unique_violation() => AppError::new(
+            StatusCode::CONFLICT,
+            "Эта почта уже занята",
+            "Email is already in use",
+        ),
         e => e.into(),
     })?;
 
@@ -182,9 +192,18 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(body): Json<LoginBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    let invalid = || AppError::new(StatusCode::UNAUTHORIZED, "Invalid credentials");
+    let invalid = || {
+        AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "Неверная почта или пароль",
+            "Invalid credentials",
+        )
+    };
     if body.email.is_empty() || body.password.is_empty() {
-        return Err(AppError::bad("Email and password are required"));
+        return Err(AppError::bad(
+            "Нужны и почта, и пароль",
+            "Email and password are required",
+        ));
     }
 
     let user = sqlx::query_as::<_, UserRow>(
@@ -225,7 +244,11 @@ pub async fn delete_account(
         .execute(&state.db)
         .await?;
     if deleted.rows_affected() == 0 {
-        return Err(AppError::new(StatusCode::NOT_FOUND, "Not found"));
+        return Err(AppError::new(
+            StatusCode::NOT_FOUND,
+            "Не найдено",
+            "Not found",
+        ));
     }
     Ok(StatusCode::NO_CONTENT)
 }

@@ -56,7 +56,7 @@ impl Meta {
     /// Единственная дверь, через которую метаданные попадают в БД: и epub,
     /// и fb2 выходят только отсюда. Пустые поля становятся `None`, чтобы
     /// в списке не мелькали пустые строки вместо отсутствующих данных.
-    fn sanitized(mut self) -> Self {
+    pub(crate) fn sanitized(mut self) -> Self {
         let opt = |v: Option<String>, limit| v.map(|s| clean(&s, limit)).filter(|s| !s.is_empty());
         self.title = clean(&self.title, TITLE_MAX);
         self.author = clean(&self.author, AUTHOR_MAX);
@@ -66,11 +66,15 @@ impl Meta {
         self.description = opt(self.description, DESCRIPTION_MAX);
 
         if self.title.is_empty() {
-            self.title = "Untitled".into();
+            self.title = UNTITLED.into();
         }
         self
     }
 }
+
+/// Название, которого в файле не нашлось. Для txt, pdf и html это норма —
+/// `store_book` подставляет вместо него имя файла.
+pub const UNTITLED: &str = "Untitled";
 
 /// Разбор синхронный и CPU-bound (распаковка zip), поэтому уходит в blocking-пул.
 pub async fn metadata(ext: &str, bytes: axum::body::Bytes) -> Result<Meta> {
@@ -78,15 +82,64 @@ pub async fn metadata(ext: &str, bytes: axum::body::Bytes) -> Result<Meta> {
     tokio::task::spawn_blocking(move || match ext.as_str() {
         "epub" => parse_epub(&bytes),
         "fb2" => parse_fb2(&bytes),
-        _ => Err(AppError::bad("Invalid file type")),
+        "mobi" | "azw3" => crate::mobi::meta(&bytes),
+        "html" => Ok(parse_html(&bytes)),
+        "md" => Ok(parse_md(&bytes)),
+        // В txt метаданных нет вовсе, а в pdf они есть, но обычно врут:
+        // «Microsoft Word - doc1» и имя того, кто печатал. Имя файла честнее.
+        "txt" | "pdf" => Ok(Meta::default().sanitized()),
+        _ => Err(AppError::bad(
+            "Неизвестный формат файла",
+            "Invalid file type",
+        )),
     })
     .await
     .map_err(AppError::internal)?
 }
 
+/// html: всё, что в нём бывает про книгу, — это `<title>`. Автора в `<meta>`
+/// пишут единицы, и что там окажется — угадать нельзя.
+fn parse_html(bytes: &[u8]) -> Meta {
+    let text = crate::reader::decode(bytes, None);
+    let title = ["<title>", "<TITLE>"]
+        .iter()
+        .find_map(|open| text.split_once(open))
+        // до ближайшего тега — то есть до </title>
+        .and_then(|(_, rest)| rest.split('<').next())
+        .unwrap_or_default();
+
+    Meta {
+        title: title.to_string(),
+        ..Default::default()
+    }
+    .sanitized()
+}
+
+/// markdown: названием служит первый заголовок — другого места под него
+/// в формате нет.
+fn parse_md(bytes: &[u8]) -> Meta {
+    let text = crate::reader::decode(bytes, None);
+    let title = text
+        .lines()
+        .take(50)
+        .find(|l| l.trim_start().starts_with('#'))
+        .map(|l| l.trim().trim_start_matches('#').trim())
+        .unwrap_or_default();
+
+    Meta {
+        title: title.to_string(),
+        ..Default::default()
+    }
+    .sanitized()
+}
+
 fn parse_epub(bytes: &[u8]) -> Result<Meta> {
-    let doc = epub::doc::EpubDoc::from_reader(std::io::Cursor::new(bytes))
-        .map_err(|e| AppError::bad(format!("Broken epub: {e}")))?;
+    let doc = epub::doc::EpubDoc::from_reader(std::io::Cursor::new(bytes)).map_err(|e| {
+        AppError::bad(
+            format!("Файл epub повреждён: {e}"),
+            format!("Broken epub: {e}"),
+        )
+    })?;
     let get = |k: &str| {
         doc.mdata(k)
             .map(|m| m.value.trim().to_string())
@@ -218,7 +271,10 @@ pub(crate) fn parse_fb2(bytes: &[u8]) -> Result<Meta> {
 
     // Дошли до конца файла, не встретив </description> — файл обрезан или это не fb2.
     if !closed {
-        return Err(AppError::bad("Broken fb2: no <description> block"));
+        return Err(AppError::bad(
+            "Файл fb2 без блока <description>",
+            "Broken fb2: no <description> block",
+        ));
     }
 
     meta.author = authors.join(", ");

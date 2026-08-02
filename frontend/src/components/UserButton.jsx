@@ -1,11 +1,12 @@
 import { useNavigate } from "react-router-dom";
+import { t } from "../i18n";
 
 const UserButton = () => {
   const navigate = useNavigate();
   return (
     <button
       className="filtrationAndAdd"
-      title="Профиль"
+      title={t("profile")}
       onClick={() => navigate("/me")}
     >
       <svg

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ModalAdd } from "./ModalAdd";
+import { t } from "../i18n";
 
 export const AddButton = ({ onAdded }) => {
   const [isAddModal, setIsAddModal] = useState();
@@ -8,6 +9,7 @@ export const AddButton = ({ onAdded }) => {
     <>
       <button
         className="filtrationAndAdd"
+        title={t("addBooks")}
         onClick={() => {
           setIsAddModal(true);
           document.body.style.overflowY = "hidden";

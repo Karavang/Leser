@@ -45,7 +45,12 @@ struct Reader<'a> {
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8]> {
         let end = self.pos.checked_add(n).filter(|e| *e <= self.data.len());
-        let end = end.ok_or_else(|| AppError::bad("Файл .rda обрывается посередине"))?;
+        let end = end.ok_or_else(|| {
+            AppError::bad(
+                "Файл .rda обрывается посередине",
+                "The .rda file ends mid-value",
+            )
+        })?;
         let out = &self.data[self.pos..end];
         self.pos = end;
         Ok(out)
@@ -95,7 +100,10 @@ impl<'a> Reader<'a> {
             STRSXP => {
                 let n = self.i32()?;
                 if !(0..=MAX_STRINGS as i32).contains(&n) {
-                    return Err(AppError::bad("Слишком большой вектор в .rda"));
+                    return Err(AppError::bad(
+                        "Слишком большой вектор в .rda",
+                        "Vector in .rda is too large",
+                    ));
                 }
                 let mut out = Vec::with_capacity(n as usize);
                 for _ in 0..n {
@@ -111,7 +119,10 @@ impl<'a> Reader<'a> {
             VECSXP => {
                 let n = self.i32()?;
                 if !(0..=MAX_STRINGS as i32).contains(&n) {
-                    return Err(AppError::bad("Слишком большой список в .rda"));
+                    return Err(AppError::bad(
+                        "Слишком большой список в .rda",
+                        "List in .rda is too large",
+                    ));
                 }
                 let mut found = None;
                 for _ in 0..n {
@@ -133,16 +144,20 @@ impl<'a> Reader<'a> {
                 Ok(None)
             }
 
-            other => Err(AppError::bad(format!(
-                "В .rda объект типа {other}, читать такое не умеем"
-            ))),
+            other => Err(AppError::bad(
+                format!("В .rda объект типа {other}, читать такое не умеем"),
+                format!("Unsupported object type {other} in .rda"),
+            )),
         }
     }
 
     fn charsxp(&mut self) -> Result<String> {
         let flags = self.i32()? as u32;
         if (flags & 0xFF) as u8 != CHARSXP {
-            return Err(AppError::bad("Ожидалась строка в векторе .rda"));
+            return Err(AppError::bad(
+                "Ожидалась строка в векторе .rda",
+                "Expected a string in the .rda vector",
+            ));
         }
         let len = self.i32()?;
         if len < 0 {
@@ -150,7 +165,10 @@ impl<'a> Reader<'a> {
         }
         let len = len as usize;
         if len > MAX_STRING_LEN {
-            return Err(AppError::bad("Слишком длинная строка в .rda"));
+            return Err(AppError::bad(
+                "Слишком длинная строка в .rda",
+                "String in .rda is too long",
+            ));
         }
         // R помечает кодировку в levels, но на практике это utf-8 или latin1;
         // from_utf8_lossy не роняет разбор на втором варианте.
@@ -163,9 +181,12 @@ impl<'a> Reader<'a> {
 fn decompress(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let limited = |r: &mut dyn Read, out: &mut Vec<u8>| -> Result<()> {
-        r.take(MAX_UNPACKED)
-            .read_to_end(out)
-            .map_err(|e| AppError::bad(format!("Не удалось распаковать .rda: {e}")))?;
+        r.take(MAX_UNPACKED).read_to_end(out).map_err(|e| {
+            AppError::bad(
+                format!("Не удалось распаковать .rda: {e}"),
+                format!("Could not decompress .rda: {e}"),
+            )
+        })?;
         Ok(())
     };
 
@@ -190,7 +211,12 @@ pub fn chapters(bytes: &[u8]) -> Result<Vec<String>> {
     let body = data
         .strip_prefix(b"RDX2\nX\n")
         .or_else(|| data.strip_prefix(b"RDX3\nX\n"))
-        .ok_or_else(|| AppError::bad("Это не .rda в формате RDX2/RDX3"))?;
+        .ok_or_else(|| {
+            AppError::bad(
+                "Это не .rda в формате RDX2/RDX3",
+                "Not an RDX2/RDX3 .rda file",
+            )
+        })?;
 
     let mut r = Reader { data: body, pos: 0 };
     r.i32()?; // версия формата
@@ -204,9 +230,12 @@ pub fn chapters(bytes: &[u8]) -> Result<Vec<String>> {
         }
     }
 
-    let found = r
-        .value()?
-        .ok_or_else(|| AppError::bad("В .rda нет текста: строкового вектора не нашлось"))?;
+    let found = r.value()?.ok_or_else(|| {
+        AppError::bad(
+            "В .rda нет текста: строкового вектора не нашлось",
+            "No text in .rda: no string vector found",
+        )
+    })?;
 
     let chapters: Vec<String> = found
         .into_iter()
@@ -215,7 +244,7 @@ pub fn chapters(bytes: &[u8]) -> Result<Vec<String>> {
         .collect();
 
     if chapters.is_empty() {
-        return Err(AppError::bad("В .rda нет текста"));
+        return Err(AppError::bad("В .rda нет текста", "No text in .rda"));
     }
     Ok(chapters)
 }

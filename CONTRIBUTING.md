@@ -18,8 +18,12 @@ PR не пройдёт CI, если не проходят эти команды:
 
 ```sh
 cd api      && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-cd frontend && npm run lint && npm run build
+cd frontend && npm run lint && npm test && npm run build
 ```
+
+Строки интерфейса живут в `frontend/src/i18n.js` — русская и английская рядом.
+`npm test` проверяет, что ключи не разошлись, поэтому новая надпись едет сразу
+на двух языках. Сообщение об ошибке с бэка — тоже: `AppError::bad(ru, en)`.
 
 Новая нетривиальная логика приезжает с одной проверкой на неё — не набором
 тестов на каждую функцию, а самым маленьким, что упадёт, если логика сломается.

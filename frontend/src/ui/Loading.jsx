@@ -1,4 +1,5 @@
 import { FallingLines } from "react-loader-spinner";
+import { t } from "../i18n";
 
 export const Loading = () => {
   return (
@@ -12,7 +13,7 @@ export const Loading = () => {
         wrapperStyle
         wrapperClass
       />
-      <h1>Loading</h1>
+      <h1>{t("loading")}</h1>
     </div>
   );
 };

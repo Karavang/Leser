@@ -2,6 +2,7 @@ import axios from "axios";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
+import { t } from "../i18n";
 
 export const BooksList = ({ books, onDeleted, onShelf }) => {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
   // Кнопка живёт в подробностях, а не на карточке: случайно снести книгу,
   // целясь в неё же, чтобы почитать, — слишком легко.
   const remove = async (book) => {
-    if (!confirm(`Удалить «${book.title}»? Отменить нельзя.`)) return;
+    if (!confirm(t("confirmDeleteBook", book.title))) return;
     try {
       await axios.delete(`/api/deleteOne/${book.filename}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -24,7 +25,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
       setDetails(null);
       onDeleted(book.filename);
     } catch (e) {
-      setError(e.response?.data?.message ?? "Не удалось удалить книгу");
+      setError(e.response?.data?.message ?? t("deleteBookFailed"));
     }
   };
 
@@ -44,7 +45,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
       // подробности открыты по этой же книге — отметку в них тоже поправить
       setDetails((d) => (d && d.id === book.id ? { ...d, mine } : d));
     } catch (e) {
-      setError(e.response?.data?.message ?? "Не удалось изменить «мои книги»");
+      setError(e.response?.data?.message ?? t("shelfFailed"));
     }
   };
 
@@ -81,14 +82,14 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
                       setDetails(book);
                     }}
                   >
-                    Подробнее
+                    {t("more")}
                   </button>
                 )}
                 {/* Видно всегда, а не по наведению: по этой отметке и понятно,
                     какие книги у читателя свои. */}
                 <button
                   className={`shelfButton ${book.mine ? "on" : ""}`}
-                  title={book.mine ? "Убрать из моих книг" : "В мои книги"}
+                  title={book.mine ? t("shelfRemove") : t("shelfAdd")}
                   aria-pressed={book.mine}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -102,7 +103,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
           ))}
         </ul>
       ) : (
-        <p>No books available.</p>
+        <p>{t("noBooks")}</p>
       )}
       {details && (
         <BookDetails

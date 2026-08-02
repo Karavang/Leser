@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Loading } from "../ui/Loading.jsx";
+import { t } from "../i18n";
+import { applyTheme, theme as saved, THEMES } from "../theme";
 
 /// Читалка одна на все форматы: сервер отдаёт книгу главами с разметкой
 /// (`/api/read`), и epub с fb2 отсюда неотличимы.
@@ -18,7 +20,6 @@ import { Loading } from "../ui/Loading.jsx";
 /// разбивки на страницы нет и не нужно: браузер уже умеет верстать колонки.
 
 const FONTS = [16, 18, 20, 22, 25, 28, 32];
-const THEMES = { day: "День", sepia: "Сепия", night: "Ночь" };
 
 /// Где читатель остановился — доля книги, а не номер страницы: страницы
 /// разные при разном шрифте и размере окна, доля одна и та же.
@@ -50,6 +51,10 @@ export const Reader = () => {
   /// первая страница каждой главы — для оглавления и подписи в шапке
   const starts = useRef([]);
   const touch = useRef(0);
+  /// Жест тачпада: листали ли уже на этом жесте. Ref, а не состояние эффекта:
+  /// обработчик переподписывается на каждой странице, и хвост инерции
+  /// от предыдущей пролистал бы дальше.
+  const wheel = useRef({ done: false });
 
   const [book, setBook] = useState(null);
   const [error, setError] = useState(null);
@@ -61,9 +66,7 @@ export const Reader = () => {
   const [font, setFont] = useState(
     () => Number(localStorage.getItem("readerFont")) || 20,
   );
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem("readerTheme") || "sepia",
-  );
+  const [theme, setTheme] = useState(saved);
 
   useEffect(() => {
     let alive = true;
@@ -75,7 +78,7 @@ export const Reader = () => {
       .catch(
         (e) =>
           alive &&
-          setError(e.response?.data?.message || "Не удалось открыть книгу"),
+          setError(e.response?.data?.message || t("openFailed")),
       );
     return () => {
       alive = false;
@@ -121,10 +124,7 @@ export const Reader = () => {
     const at = Math.min(count - 1, Math.round(spot.current * count));
     setTotal(count);
     setPage(at);
-    // без auto прыжок к сохранённому месту едет плавной прокруткой через всю книгу
-    v.style.scrollBehavior = "auto";
     v.scrollLeft = at * step;
-    v.style.scrollBehavior = "";
   }, []);
 
   useLayoutEffect(measure, [html, font, measure]);
@@ -205,6 +205,46 @@ export const Reader = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, page, total, toc]);
 
+  // Перелистывание двумя пальцами по тачпаду. Нативно прокрутить читалку
+  // нельзя — у неё overflow: hidden, — поэтому горизонтальное колесо сами
+  // превращаем в страницу.
+  useEffect(() => {
+    const v = view.current;
+    if (!v) return;
+    const onWheel = (e) => {
+      // По вертикали не листаем: иначе обычная прокрутка мышью или чуть
+      // косой жест уводили бы страницу без спросу.
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      // Без этого macOS понимает горизонтальный жест как «назад по истории»
+      // и уносит из книги совсем.
+      e.preventDefault();
+
+      // За один жест тачпад шлёт десятки событий, а после того как пальцы
+      // убрали, ещё секунду идёт хвост инерции. Листать надо один раз
+      // на жест — значит, надо отличать новый жест от хвоста старого.
+      //
+      // Хвост дрожит, поэтому сравнивать соседние события бесполезно: любой
+      // скачок вверх выглядит как новый жест. По времени тоже не развести —
+      // пауза между жестами короче, чем подтормаживание на перерисовке.
+      // Надёжно одно: касание гасит инерцию, и новый жест всегда начинается
+      // с разгона — с сдвигов в пару пикселей, до которых хвост доходит уже
+      // затухая и обратно не поднимается.
+      const dx = Math.abs(e.deltaX);
+      const g = wheel.current;
+
+      if (dx <= 2) g.done = false;
+
+      // Жест начинается с почти нулевых сдвигов — ждём первого заметного
+      if (g.done || dx < 6) return;
+      g.done = true;
+      go(page + (e.deltaX > 0 ? 1 : -1));
+    };
+
+    // passive: false — иначе preventDefault не работает вовсе
+    v.addEventListener("wheel", onWheel, { passive: false });
+    return () => v.removeEventListener("wheel", onWheel);
+  }, [go, page]);
+
   // На сервер закладка уходит с задержкой: иначе на каждое перелистывание
   // будет запрос, а листают подряд. У себя запоминаем сразу — иначе выход
   // из книги в первую же секунду терял бы страницу.
@@ -229,9 +269,10 @@ export const Reader = () => {
     setFont(size);
     localStorage.setItem("readerFont", String(size));
   };
+  // Тема одна на всё приложение: кружок в читалке перекрашивает и библиотеку.
   const paint = (name) => {
     setTheme(name);
-    localStorage.setItem("readerTheme", name);
+    applyTheme(name);
   };
 
   if (error)
@@ -239,7 +280,7 @@ export const Reader = () => {
       <div className={`reader ${theme}`}>
         <div className="readerFail">
           <p>{error}</p>
-          <button onClick={close}>К библиотеке</button>
+          <button onClick={close}>{t("toLibrary")}</button>
         </div>
       </div>
     );
@@ -257,7 +298,7 @@ export const Reader = () => {
         <button
           className="flat"
           onClick={close}
-          title="К библиотеке"
+          title={t("toLibrary")}
         >
           ←
         </button>
@@ -268,7 +309,7 @@ export const Reader = () => {
         <div className="readerTools">
           <button
             className="flat"
-            title="Меньше шрифт"
+            title={t("fontSmaller")}
             disabled={font <= FONTS[0]}
             onClick={() => pick(FONTS[FONTS.indexOf(font) - 1] ?? FONTS[0])}
           >
@@ -276,7 +317,7 @@ export const Reader = () => {
           </button>
           <button
             className="flat"
-            title="Больше шрифт"
+            title={t("fontBigger")}
             disabled={font >= FONTS[FONTS.length - 1]}
             onClick={() =>
               pick(FONTS[FONTS.indexOf(font) + 1] ?? FONTS[FONTS.length - 1])
@@ -284,17 +325,18 @@ export const Reader = () => {
           >
             A+
           </button>
-          {Object.entries(THEMES).map(([name, label]) => (
+          {THEMES.map((name) => (
             <button
               key={name}
               className={`swatch ${name} ${theme === name ? "active" : ""}`}
-              title={label}
+              title={t(`theme${name[0].toUpperCase()}${name.slice(1)}`)}
+              aria-pressed={theme === name}
               onClick={() => paint(name)}
             />
           ))}
           <button
             className={`flat ${toc ? "active" : ""}`}
-            title="Оглавление"
+            title={t("contents")}
             onClick={() => setToc(!toc)}
           >
             ☰
@@ -305,7 +347,7 @@ export const Reader = () => {
       <div className="readerBody">
         <button
           className="flip left"
-          title="Назад"
+          title={t("prevPage")}
           disabled={page === 0}
           onClick={() => go(page - 1)}
         >
@@ -336,7 +378,7 @@ export const Reader = () => {
         </div>
         <button
           className="flip right"
-          title="Дальше"
+          title={t("nextPage")}
           disabled={page >= total - 1}
           onClick={() => go(page + 1)}
         >
@@ -355,7 +397,7 @@ export const Reader = () => {
                       setToc(false);
                     }}
                   >
-                    {c.title || `Часть ${i + 1}`}
+                    {c.title || t("part", i + 1)}
                   </button>
                 </li>
               ))}
@@ -371,7 +413,7 @@ export const Reader = () => {
               setBack(null);
             }}
           >
-            ← назад к странице {back + 1}
+            {t("backToPage", back + 1)}
           </button>
         )}
       </div>
@@ -382,7 +424,7 @@ export const Reader = () => {
           min={0}
           max={Math.max(0, total - 1)}
           value={page}
-          aria-label="Положение в книге"
+          aria-label={t("position")}
           onChange={(e) => go(Number(e.target.value))}
         />
         <span>

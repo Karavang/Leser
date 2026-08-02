@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { lang, t } from "../../i18n";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ const Auth = () => {
     try {
       const response = await fetch(path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Lang": lang },
         body: JSON.stringify(body),
       });
       const data = await response.json();
@@ -29,7 +30,7 @@ const Auth = () => {
       // fetch не бросает на 4xx: без этой проверки неверный пароль падал
       // дальше по коду на data.data.user и «срабатывал» через catch.
       if (!response.ok) {
-        toast.error(data.message ?? "Не удалось войти");
+        toast.error(data.message ?? t("loginFailed"));
         return;
       }
 
@@ -39,7 +40,7 @@ const Auth = () => {
       navigate("/", { replace: true });
     } catch (error) {
       console.error(path, error);
-      toast.error("Сервер не отвечает");
+      toast.error(t("serverSilent"));
     }
   };
 
@@ -88,11 +89,11 @@ const Auth = () => {
     <div className="auth">
       {isRegister ? (
         <>
-          <h1>Login</h1>
+          <h1>{t("signIn")}</h1>
           <input
             type="text"
             id="emailInput"
-            placeholder="Email"
+            placeholder={t("email")}
             onChange={(e) => {
               setTimeout(
                 () => checkEmail(e.target.value),
@@ -102,7 +103,7 @@ const Auth = () => {
           />
           <input
             id="passInput"
-            placeholder="Password"
+            placeholder={t("password")}
             onChange={(e) => {
               typePass();
               setTimeout(
@@ -113,29 +114,29 @@ const Auth = () => {
             type={inputType}
           />
           <p>
-            Don&apos;t registered yet? Time to{" "}
-            <span onClick={() => setIsReg(false)}>registration</span>!
+            {t("noAccount")}{" "}
+            <span onClick={() => setIsReg(false)}>{t("goRegister")}</span>
           </p>
           <button
             id="loginButton"
             disabled={!isCanLogin}
             onClick={login}
           >
-            Login
+            {t("signIn")}
           </button>
         </>
       ) : (
         <>
-          <h1>Registration</h1>
+          <h1>{t("signUp")}</h1>
           <input
             type="text"
-            placeholder="Username"
+            placeholder={t("username")}
             onChange={(e) => setUsername(e.target.value)}
           />{" "}
           <input
             type="text"
             id="emailInput"
-            placeholder="Enter your email"
+            placeholder={t("emailHint")}
             onChange={(e) => {
               setTimeout(
                 () => checkEmail(e.target.value),
@@ -145,7 +146,7 @@ const Auth = () => {
           />
           <input
             id="passInput"
-            placeholder="Create password, min 8 symbols"
+            placeholder={t("passwordHint")}
             onChange={(e) => {
               typePass();
               setTimeout(
@@ -156,15 +157,15 @@ const Auth = () => {
             type={inputType}
           />
           <p>
-            Already have account?{" "}
-            <span onClick={() => setIsReg(true)}>Login</span> now!
+            {t("haveAccount")}{" "}
+            <span onClick={() => setIsReg(true)}>{t("goLogin")}</span>
           </p>
           <button
             id="loginButton"
             disabled={!isCanLogin}
             onClick={registration}
           >
-            Register
+            {t("signUp")}
           </button>
         </>
       )}

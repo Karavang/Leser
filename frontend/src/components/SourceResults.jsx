@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useState } from "react";
+import { t } from "../i18n";
 
 // Второй по приоритету результат: своя библиотека выше, найденное снаружи —
 // под ней и только пока в поиске что-то введено.
@@ -21,7 +22,7 @@ export const SourceResults = ({ found, onImported }) => {
       );
       onImported();
     } catch (e) {
-      setError(e.response?.data?.message ?? "Не удалось добавить книгу");
+      setError(e.response?.data?.message ?? t("importFailed"));
     } finally {
       setBusy(null);
     }
@@ -31,7 +32,7 @@ export const SourceResults = ({ found, onImported }) => {
 
   return (
     <div className="sourceResults">
-      <h3>Другие источники</h3>
+      <h3>{t("otherSources")}</h3>
       {error && <p className="error">{error}</p>}
       <ul>
         {found.map((book) => (
@@ -51,7 +52,7 @@ export const SourceResults = ({ found, onImported }) => {
               disabled={busy === book.downloadUrl}
               onClick={() => add(book)}
             >
-              {busy === book.downloadUrl ? "Забираем…" : "В библиотеку"}
+              {busy === book.downloadUrl ? t("importing") : t("importBook")}
             </button>
           </li>
         ))}

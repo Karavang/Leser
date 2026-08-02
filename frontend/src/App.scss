@@ -1,18 +1,64 @@
+// ── темы ──────────────────────────────────────────────────────────────────
+// Тема одна на приложение и читалку: класс висит на <html> (theme.js), всё
+// остальное — переменные. Оранжевый общий для всех тем: он и на бумаге,
+// и на тёмном фоне читается, а третий вариант акцента только рябил бы.
 :root {
-  --background: #ded09f;
   --back-orange: #ff9735;
   --back-hover: #ff7b00;
   --disabled-orange: #ffbd80;
+  --on-accent: #101720; // текст поверх оранжевого — всегда тёмный
+  --ok: #2e7d32;
+  --danger: #c0392b;
+
+  // сепия — она же тема по умолчанию
+  --background: #ded09f;
+  --paper: #ded09f;
+  --card: #f5ecd7;
+  --field: rgba(255, 255, 255, 0.5);
+  --ink: #2b2415;
+  --dim: #7a6c48;
+  --line: #bfbfbf;
+}
+
+:root.day {
+  --background: #eceae4;
+  --paper: #fbf9f4;
+  --card: #ffffff;
+  --field: rgba(255, 255, 255, 0.7);
+  --ink: #1b1b1b;
+  --dim: #8a8177;
+  --line: #cfccc4;
+}
+
+:root.night {
+  --background: #12161c;
+  --paper: #12161c;
+  --card: #1b2028;
+  --field: rgba(255, 255, 255, 0.07);
+  --ink: #c7c2b6;
+  --dim: #6a7280;
+  --line: #333b47;
+  --ok: #6dbf73;
+  --danger: #ef6b5e;
 }
 
 body {
   background-color: var(--background);
+  color: var(--ink);
   margin: 0;
   padding: 0px 16px;
   scrollbar-width: thin;
   scrollbar-color: auto;
 
   font-family: "Roboto Mono", serif;
+}
+// Поля и кнопки цвет текста не наследуют — без этого в ночной теме
+// в них остаётся чёрный по чёрному.
+input,
+button,
+select,
+textarea {
+  color: inherit;
 }
 ul,
 li {
@@ -44,15 +90,15 @@ li {
       min-width: 225px;
       height: 320px;
 
-      border: 1px solid #bfbfbf;
+      border: 1px solid var(--line);
       border-radius: 10px;
-      background-color: #f5ecd7;
+      background-color: var(--card);
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
       transition: transform 0.2s, box-shadow 0.2s;
 
       h2 {
         text-align: left;
-        color: #333;
+        color: var(--ink);
         font-size: 1.5rem;
         margin-bottom: 12px;
       }
@@ -60,7 +106,7 @@ li {
       h3 {
         height: 40px;
         text-align: left;
-        color: #444;
+        color: var(--dim);
         font-size: 1.125rem;
         margin-bottom: 12px;
       }
@@ -72,12 +118,12 @@ li {
         }
 
         &::-webkit-scrollbar-thumb {
-          background-color: #888;
+          background-color: var(--dim);
           border-radius: 2px;
         }
 
         &::-webkit-scrollbar-track {
-          background: #f1f1f1;
+          background: color-mix(in srgb, var(--dim) 20%, transparent);
           border-radius: 2px;
         }
       }
@@ -121,22 +167,6 @@ li {
   color: var(--ink);
   --pad: 40px;
 
-  &.day {
-    --paper: #fbf9f4;
-    --ink: #1b1b1b;
-    --dim: #8a8177;
-  }
-  &.sepia {
-    --paper: #ded09f;
-    --ink: #2b2415;
-    --dim: #7a6c48;
-  }
-  &.night {
-    --paper: #12161c;
-    --ink: #c7c2b6;
-    --dim: #6a7280;
-  }
-
   button {
     font-family: inherit;
     color: inherit;
@@ -169,25 +199,27 @@ li {
       background: color-mix(in srgb, var(--dim) 35%, transparent);
     }
   }
-  .swatch {
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--dim);
-    &.day {
-      background: #fbf9f4;
-    }
-    &.sepia {
-      background: #ded09f;
-    }
-    &.night {
-      background: #12161c;
-    }
-    &.active {
-      outline: 2px solid var(--back-orange);
-      outline-offset: 1px;
-    }
+}
+// Кружки-темы: в шапке читалки и в настройках профиля — один и тот же выбор.
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--dim);
+  border-radius: 50%;
+  cursor: pointer;
+  &.day {
+    background: #fbf9f4;
+  }
+  &.sepia {
+    background: #ded09f;
+  }
+  &.night {
+    background: #12161c;
+  }
+  &.active {
+    outline: 2px solid var(--back-orange);
+    outline-offset: 1px;
   }
 }
 .readerWhat {
@@ -221,11 +253,14 @@ li {
   display: flex;
   align-items: stretch;
 }
+// scroll-behavior: smooth здесь стоять не может: у элемента с overflow:hidden
+// Chrome такую прокрутку просто не выполняет — scrollLeft остаётся прежним,
+// и страницы перестают листаться вовсе, хотя счётчик считает. Мгновенный
+// переход к тому же и честнее: страница книги не «переезжает», а меняется.
 .readerViewport {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  scroll-behavior: smooth;
 }
 .readerPages {
   height: 100%;
@@ -300,14 +335,45 @@ li {
     margin: 0.8em auto;
     break-inside: avoid;
   }
+  // Код, таблицы и списки приезжают в основном из markdown и html.
+  // В колонку шириной в полэкрана они не влезают сами по себе: длинная
+  // строка кода вылезает поверх соседней страницы и утаскивает за собой
+  // всю разбивку — поэтому и перенос, и table-layout: fixed.
+  pre {
+    margin: 0.8em 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    text-align: left;
+    text-indent: 0;
+    font-size: 0.82em;
+  }
+  code {
+    font-size: 0.9em;
+  }
   table {
     border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
     margin: 0.8em auto;
+    font-size: 0.88em;
     td {
       border: 1px solid var(--dim);
       padding: 2px 6px;
+      text-align: left;
       text-indent: 0;
+      overflow-wrap: anywhere;
     }
+  }
+  // ul и li в App.scss обнулены глобально — в книге маркеры и отступ нужны
+  ul,
+  ol {
+    margin: 0.8em 0;
+    padding-left: 1.6em;
+    text-align: left;
+  }
+  li {
+    text-indent: 0;
+    list-style: revert;
   }
   // Ссылки внутрь книги: оглавление в аннотации, сноски. Подчёркивание
   // пунктиром, а не сплошное — в тексте книги сплошное читается как помарка.
@@ -336,7 +402,7 @@ li {
   border: none;
   border-radius: 16px;
   background: var(--back-orange);
-  color: #101720;
+  color: var(--on-accent);
   font-size: 13px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   &:hover {
@@ -420,6 +486,7 @@ li {
     padding: 8px 16px;
     border: none;
     border-radius: 4px;
+    color: var(--on-accent);
     background: var(--back-orange);
   }
 }
@@ -458,6 +525,9 @@ li {
     background-color: var(--back-orange);
     cursor: pointer;
     padding: 0;
+    svg {
+      fill: var(--on-accent);
+    }
     display: flex;
     align-items: center;
     justify-content: center;
@@ -470,57 +540,167 @@ li {
   .searchingLine {
     width: 100%;
     height: 32px;
+    padding: 0 8px;
     border-radius: 3px;
     border: none;
-    background: rgba($color: #ffffff, $alpha: 0.5);
+    background: var(--field);
   }
 }
+// Сам <dialog> — только позиция и фон: карточку рисует .modalCard,
+// иначе клик «мимо карточки» некуда было бы отличить от клика по ней.
 .modalAdd {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.1);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  max-width: 100vw;
 
-  .inModal {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
-    width: 500px;
+  &::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+}
 
-    height: 600px;
-    background-color: var(--back-orange);
-    border-radius: 5px;
-    div {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      label {
-        min-width: none;
-        height: 80%;
-        width: 80%;
-      }
-    }
-    button {
-      cursor: pointer;
-    }
-    @media (max-width: 480px) {
-      width: 95%;
+.modalCard {
+  width: min(560px, 92vw);
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background-color: var(--card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+
+    h2 {
+      margin: 0;
+      font-size: 1.25rem;
     }
   }
-  button {
+}
+
+.modalClose {
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--dim) 20%, transparent);
+    color: var(--ink);
+  }
+}
+
+.dropZone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 20px;
+  border: 2px dashed var(--line);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--dim);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+
+  // Без этого перетаскивание над текстом внутри зоны считалось бы уходом
+  // из неё: dragleave приходит на каждой границе дочернего элемента.
+  > * {
+    pointer-events: none;
+  }
+
+  // input нужен настоящий: он даёт и выбор файла, и фокус с клавиатуры
+  input {
     position: absolute;
-    top: 4px;
-    right: 4px;
-    background: none;
-    border: none;
-    padding: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+
+  b {
+    color: var(--ink);
+    font-size: 1.05rem;
+  }
+  span {
+    font-size: 0.9rem;
+  }
+  small {
+    opacity: 0.7;
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+
+  &:hover,
+  &:focus-within {
+    border-color: var(--back-orange);
+  }
+  &.over {
+    border-color: var(--back-hover);
+    background: rgba(255, 151, 53, 0.15);
+  }
+}
+
+.uploads {
+  margin-top: 16px;
+  max-height: 220px;
+  overflow-y: auto;
+
+  li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--dim) 25%, transparent);
+    list-style: none;
+    font-size: 0.88rem;
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .uploadName {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .uploadState {
+    white-space: nowrap;
+    font-size: 0.82rem;
+    opacity: 0.75;
+  }
+  .done .uploadState {
+    color: var(--ok);
+    opacity: 1;
+  }
+  .fail .uploadState {
+    color: var(--danger);
+    opacity: 1;
+  }
+
+  .uploadBar {
+    grid-column: 1 / -1;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--dim) 25%, transparent);
+    overflow: hidden;
+
+    div {
+      height: 100%;
+      background-color: var(--back-orange);
+      transition: width 0.15s;
+    }
   }
 }
 .auth {
@@ -539,8 +719,8 @@ li {
     width: 250px;
     height: 30px;
     padding: 4px 8px;
-    background-color: rgba(255, 196, 141, 0.3);
-    border: 1px solid #101720; /* Keeps a fixed border width */
+    background-color: var(--field);
+    border: 1px solid var(--line);
     border-radius: 5px;
     transition: box-shadow 0.3s ease, border-color 0.3s ease; /* Smooth transition for border color and shadow */
 
@@ -557,6 +737,7 @@ li {
   #loginButton {
     width: 150px;
     height: 30px;
+    color: var(--on-accent);
     background: var(--back-orange);
     border: none;
     border-radius: 5px;
@@ -596,13 +777,13 @@ li {
     max-height: 80vh;
     overflow-y: auto; // раскрытые настройки не должны вылезать за карточку
     padding: 3rem;
-    background: linear-gradient(145deg, #ffffff, #f0f0f0);
+    background: var(--card);
     border-radius: 20px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
     margin: auto 0; // Center vertically
 
     h1 {
-      color: #2c3e50;
+      color: var(--ink);
       font-size: clamp(2rem, 5vw, 3rem);
       margin-bottom: 1rem;
       font-weight: 700;
@@ -611,7 +792,7 @@ li {
     }
 
     h2 {
-      color: #34495e;
+      color: var(--dim);
       font-size: clamp(1.2rem, 3vw, 1.8rem);
       margin-bottom: 2rem;
       font-weight: 500;
@@ -620,7 +801,7 @@ li {
 
     h3 {
       font-size: clamp(1.1rem, 2.5vw, 1.5rem);
-      color: #2c3e50;
+      color: var(--ink);
       margin: 2rem 0 1rem;
       padding-bottom: 0.5rem;
       border-bottom: 2px solid #3498db;
@@ -658,9 +839,9 @@ li {
 
       li {
         padding: 1.5rem;
-        background: rgba(255, 255, 255, 0.7);
+        background: var(--field);
         border-radius: 12px;
-        border: 1px solid rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--line);
         transition: all 0.3s ease;
         backdrop-filter: blur(5px);
         cursor: pointer;
@@ -720,11 +901,11 @@ li {
   svg {
     margin: 0;
     padding: 0;
-    fill: black;
-    stroke: #101720;
+    fill: var(--ink);
+    stroke: none;
     transition: 0.2s;
     &:hover {
-      fill: #66561a;
+      fill: var(--back-hover);
     }
   }
 }
@@ -740,6 +921,9 @@ li {
   display: flex;
   align-items: center;
   justify-content: center;
+  svg {
+    fill: var(--on-accent);
+  }
 }
 
 .tabs {
@@ -755,12 +939,14 @@ li {
     border-radius: 3px;
     cursor: pointer;
     font-family: inherit;
-    background: rgba($color: #ffffff, $alpha: 0.5);
+    background: var(--field);
 
     &:hover {
+      color: var(--on-accent);
       background-color: var(--disabled-orange);
     }
     &.active {
+      color: var(--on-accent);
       background-color: var(--back-orange);
     }
   }
@@ -788,15 +974,16 @@ li {
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
-    background: rgba(255, 255, 255, 0.6);
-    color: #8a8177;
+    background: var(--field);
+    color: var(--dim);
 
     &:hover {
+      color: var(--on-accent);
       background: var(--disabled-orange);
     }
     &.on {
       background: var(--back-orange);
-      color: #101720;
+      color: var(--on-accent);
     }
   }
 
@@ -808,6 +995,7 @@ li {
     cursor: pointer;
     font-family: inherit;
     font-size: 0.75rem;
+    color: var(--on-accent);
     background-color: var(--back-orange);
 
     &:hover {
@@ -821,9 +1009,10 @@ li {
   max-width: 560px;
   width: calc(100% - 32px);
   padding: 0;
-  border: 1px solid #bfbfbf;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  background-color: #f5ecd7;
+  color: var(--ink);
+  background-color: var(--card);
   font-family: inherit;
 
   &::backdrop {
@@ -836,11 +1025,11 @@ li {
 
   h2 {
     margin: 0 0 4px;
-    color: #333;
+    color: var(--ink);
   }
   h3 {
     margin: 0 0 16px;
-    color: #444;
+    color: var(--dim);
     font-size: 1.125rem;
     font-weight: 500;
   }
@@ -852,7 +1041,7 @@ li {
     margin: 0 0 16px;
 
     dt {
-      color: #666;
+      color: var(--dim);
       font-size: 0.875rem;
     }
     dd {
@@ -866,7 +1055,7 @@ li {
     overflow-y: auto;
     margin: 0 0 24px;
     padding-top: 16px;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    border-top: 1px solid var(--line);
     white-space: pre-line; // аннотация приходит с переводами строк
   }
 
@@ -882,6 +1071,7 @@ li {
       border-radius: 3px;
       cursor: pointer;
       font-family: inherit;
+      color: var(--on-accent);
       background-color: var(--back-orange);
 
       &:hover {
@@ -891,13 +1081,13 @@ li {
 
     // Удаление намеренно выглядит иначе, чем «Закрыть», и стоит с другого края.
     .deleteBook {
-      border: 1px solid #c0392b;
-      color: #c0392b;
+      border: 1px solid var(--danger);
+      color: var(--danger);
       background: transparent;
 
       &:hover {
-        color: #fff;
-        background-color: #c0392b;
+        color: var(--card);
+        background-color: var(--danger);
       }
     }
   }
@@ -906,7 +1096,7 @@ li {
 // Раскрывашка на <details>: состояние держит браузер, JS не участвует.
 .settings {
   margin-top: 24px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  border-top: 1px solid var(--line);
   padding-top: 16px;
 
   summary {
@@ -918,7 +1108,11 @@ li {
     border-radius: 3px;
     cursor: pointer;
     list-style: none; // убирает дефолтный треугольник
+    color: var(--on-accent);
     background-color: var(--back-orange);
+    svg {
+      fill: var(--on-accent);
+    }
 
     &::-webkit-details-marker {
       display: none;
@@ -943,7 +1137,7 @@ li {
     padding: 12px 0;
 
     & + .settingsRow {
-      border-top: 1px solid rgba(0, 0, 0, 0.08);
+      border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent);
     }
 
     span {
@@ -951,7 +1145,7 @@ li {
       flex-direction: column;
     }
     small {
-      color: #666;
+      color: var(--dim);
       font-size: 0.75rem;
     }
 
@@ -961,38 +1155,57 @@ li {
       gap: 8px;
     }
   }
+
+  .langPick {
+    flex: none;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.9rem;
+    background: var(--card);
+  }
+
+  // Три кружка тем — те же, что в шапке читалки.
+  .themePick {
+    display: flex;
+    flex: none;
+    gap: 8px;
+  }
 }
 
 .deleteAccount {
   flex: none;
   height: 32px;
   padding: 0 16px;
-  border: 1px solid #c0392b;
+  border: 1px solid var(--danger);
   border-radius: 3px;
   cursor: pointer;
   font-family: inherit;
-  color: #c0392b;
+  color: var(--danger);
   background: transparent;
 
   &:hover {
-    color: #fff;
-    background-color: #c0392b;
+    color: var(--card);
+    background-color: var(--danger);
   }
 }
 
 .error {
-  color: #c0392b;
+  color: var(--danger);
 }
 
 // Найденное во внешних источниках: ниже своей библиотеки, потому что
 // приоритет у неё, и только пока в поиске что-то введено.
 .sourceResults {
   padding: 16px 0 32px;
-  border-top: 1px solid rgba(0, 0, 0, 0.15);
+  border-top: 1px solid var(--line);
 
   h3 {
     margin: 0 0 12px;
-    color: #444;
+    color: var(--dim);
   }
 
   ul {
@@ -1009,23 +1222,23 @@ li {
     padding: 12px 16px;
     list-style-type: none;
 
-    border: 1px dashed #bfbfbf; // пунктир: книги ещё нет в библиотеке
+    border: 1px dashed var(--line); // пунктир: книги ещё нет в библиотеке
     border-radius: 10px;
-    background-color: rgba(245, 236, 215, 0.5);
+    background-color: var(--field);
 
     h4 {
       margin: 0 0 4px;
       font-size: 1rem;
-      color: #333;
+      color: var(--ink);
     }
     p {
       margin: 0 0 4px;
       font-size: 0.875rem;
-      color: #444;
+      color: var(--dim);
     }
     a {
       font-size: 0.75rem;
-      color: #666;
+      color: var(--dim);
     }
 
     button {
@@ -1037,6 +1250,7 @@ li {
       cursor: pointer;
       font-family: inherit;
       font-size: 0.75rem;
+      color: var(--on-accent);
       background-color: var(--back-orange);
 
       &:hover {
