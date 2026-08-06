@@ -51,6 +51,35 @@ export const RU = {
 
   // профиль и настройки
   booksInRead: "Читаю сейчас",
+  noBooksInRead: "Ни одной книги пока не открыто",
+  loadFailed: "Не удалось загрузить",
+  deleteFailed: "Не удалось удалить",
+
+  // статистика
+  daysInRow: "дней подряд",
+  pagesMonth: "страниц за месяц",
+  statReading: "читаю",
+  statFinished: "прочитано",
+
+  // цитаты и словарь
+  quotes: "Цитаты",
+  noQuotes: "Выделите текст в книге — он сохранится сюда",
+  openAtQuote: "Открыть книгу на этом месте",
+  saveQuote: "В цитаты",
+  quoteSaved: "Цитата сохранена",
+  dictionary: "Словарь",
+  noWords: "Выделите слово в книге — оно сохранится сюда",
+  saveWord: "В словарь",
+  wordSaved: "Слово в словаре",
+  ankiExport: "Карточки для Anki",
+  saveFailed: "Не удалось сохранить",
+
+  // выгрузка
+  exportAll: "Забрать всё своё",
+  exportHint: "закладки, полка, цитаты и словарь одним файлом",
+  exportDo: "Выгрузить",
+  exportFailed: "Не удалось выгрузить",
+
   settings: "Настройки",
   logout: "Выйти из аккаунта",
   logoutHint: "на этом устройстве, книги и закладки останутся",
@@ -135,6 +164,32 @@ export const EN = {
   uploadFailed: "upload failed",
 
   booksInRead: "Currently reading",
+  noBooksInRead: "No book opened yet",
+  loadFailed: "Could not load",
+  deleteFailed: "Could not delete",
+
+  daysInRow: "day streak",
+  pagesMonth: "pages this month",
+  statReading: "reading",
+  statFinished: "finished",
+
+  quotes: "Quotes",
+  noQuotes: "Select text in a book — it lands here",
+  openAtQuote: "Open the book at this spot",
+  saveQuote: "Save quote",
+  quoteSaved: "Quote saved",
+  dictionary: "Dictionary",
+  noWords: "Select a word in a book — it lands here",
+  saveWord: "Save word",
+  wordSaved: "Saved to the dictionary",
+  ankiExport: "Anki cards",
+  saveFailed: "Could not save",
+
+  exportAll: "Take everything with you",
+  exportHint: "bookmarks, shelf, quotes and dictionary in one file",
+  exportDo: "Export",
+  exportFailed: "Could not export",
+
   settings: "Settings",
   logout: "Sign out",
   logoutHint: "on this device; books and bookmarks stay",

@@ -410,6 +410,72 @@ li {
   }
 }
 
+// Что делать с выделенным. Внизу по центру, а не всплывашкой у самого
+// выделения: панель не закрывает то, что выделили, и не надо считать
+// координаты, которые в колонках всё равно врут.
+.readerSel {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  max-width: min(90%, 640px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+
+  // сама цитата в одну строку: панель — про кнопки, а текст читатель и так видит
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--dim);
+  }
+
+  button {
+    flex: none;
+    padding: 4px 12px;
+    border: none;
+    border-radius: 14px;
+    background: var(--back-orange);
+    color: var(--on-accent);
+    font-size: 13px;
+    &:hover {
+      background: var(--back-hover);
+    }
+    &.flat {
+      padding: 4px 8px;
+      background: none;
+      color: var(--dim);
+      font-size: 16px;
+      &:hover {
+        color: var(--ink);
+      }
+    }
+  }
+}
+
+.readerSaid {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 6px 14px;
+  border-radius: 16px;
+  background: var(--back-orange);
+  color: var(--on-accent);
+  font-size: 13px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
 .flip {
   width: var(--pad);
   border: none;
@@ -762,6 +828,12 @@ li {
 }
 .userPage {
   width: 100%;
+
+  // кнопка «на главную» — в правом верхнем углу, остальное по центру
+  .closeButton {
+    align-self: flex-end;
+    cursor: pointer;
+  }
 
   display: flex;
   flex-direction: column;
@@ -1173,6 +1245,175 @@ li {
     display: flex;
     flex: none;
     gap: 8px;
+  }
+}
+
+// Статистика чтения. Стрик и три числа — крупно, месяц по дням — столбиками.
+.stats {
+  margin: 0 0 24px;
+
+  .statNumbers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+
+    b {
+      display: flex;
+      flex-direction: column;
+      font-size: 1.8rem;
+      line-height: 1.1;
+      color: var(--back-orange);
+    }
+    small {
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: var(--dim);
+    }
+  }
+
+  // Столбики без библиотеки графиков: тридцать чисел — это тридцать div'ов
+  // с высотой в процентах, и всё.
+  .statChart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 48px;
+    margin-top: 16px;
+
+    i {
+      flex: 1;
+      // день без чтения тоже должен быть виден — иначе в ряду дырки
+      min-height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: color-mix(in srgb, var(--back-orange) 70%, transparent);
+    }
+  }
+}
+
+// Цитаты и словарь. Свёрнуты по умолчанию: их становится много, а кабинет
+// не должен превращаться в ленту.
+.notes {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    cursor: pointer;
+    font-size: 1.1rem;
+    list-style: none;
+    &::-webkit-details-marker {
+      display: none;
+    }
+    span {
+      padding: 0 8px;
+      border-radius: 10px;
+      background: var(--field);
+      color: var(--dim);
+      font-size: 0.8rem;
+    }
+  }
+
+  blockquote {
+    position: relative;
+    margin: 12px 0;
+    padding: 12px 40px 12px 16px;
+    border-left: 3px solid var(--back-orange);
+    background: var(--field);
+    border-radius: 0 8px 8px 0;
+
+    p {
+      margin: 0;
+      &.goto {
+        cursor: pointer;
+      }
+      &.goto:hover {
+        color: var(--back-hover);
+      }
+    }
+    cite {
+      display: block;
+      margin-top: 8px;
+      color: var(--dim);
+      font-size: 0.8rem;
+    }
+  }
+
+  .wordList {
+    margin: 12px 0 0;
+    display: block;
+
+    // карточки книг выше по файлу — не про этот список: здесь строки
+    li {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      padding: 8px 0;
+      list-style-type: none;
+      background: none;
+      border: none;
+      border-radius: 0;
+      border-bottom: 1px solid color-mix(in srgb, var(--dim) 25%, transparent);
+      cursor: default;
+      &:hover {
+        box-shadow: none;
+      }
+
+      b {
+        flex: none;
+        min-width: 140px;
+      }
+      span {
+        flex: 1;
+        color: var(--dim);
+        font-size: 0.85rem;
+      }
+    }
+  }
+
+  // крестик у цитаты и у слова — один и тот же
+  blockquote > button,
+  .wordList button {
+    flex: none;
+    border: none;
+    background: none;
+    color: var(--dim);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    &:hover {
+      color: var(--danger);
+    }
+  }
+  blockquote > button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+  }
+}
+
+.empty {
+  color: var(--dim);
+}
+
+// Кнопка «сделать что-то полезное» — рядом с настройками и в словаре.
+.secondary {
+  flex: none;
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--back-orange);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--back-orange);
+  background: transparent;
+
+  &:hover {
+    color: var(--on-accent);
+    background-color: var(--back-orange);
   }
 }
 

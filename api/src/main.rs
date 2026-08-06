@@ -12,6 +12,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 mod auth;
 mod books;
+mod me;
 mod mobi;
 mod parse;
 mod rda;
@@ -220,7 +221,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/myBooks/{filename}",
             post(books::add_to_my).delete(books::remove_from_my),
         )
+        .route("/progress/{filename}", get(books::progress_of))
         .route("/booksInRead", get(books::books_in_read))
+        // Личный кабинет: выписки, словарь, статистика и выгрузка всего своего.
+        .route("/quotes", get(me::quotes).post(me::add_quote))
+        .route("/quotes/{id}", delete(me::delete_quote))
+        .route("/words", get(me::words).post(me::add_word))
+        .route("/words/{id}", delete(me::delete_word))
+        .route("/stats", get(me::stats))
+        .route("/export", get(me::export))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
         .route("/registration", post(auth::registration))

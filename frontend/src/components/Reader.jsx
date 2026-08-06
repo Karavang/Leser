@@ -31,6 +31,15 @@ const savedSpot = (filename) => {
   return Number.isFinite(frac) && frac >= 0 && frac < 1 ? frac : 0;
 };
 
+/// Одно слово — то, что кладут в словарь; всё остальное идёт в цитаты.
+/// Дефис и апостроф внутри слова считаются частью слова: «во-первых»,
+/// «don't», «l'homme» — это по-прежнему одно слово.
+const ONE_WORD = /^[\p{L}\p{M}'’-]+$/u;
+
+/// Сколько букв фразы сохраняется вокруг слова. Карточка без примера
+/// бесполезна, а весь абзац в неё не влезет.
+const CONTEXT = 120;
+
 const rememberSpot = (filename, frac) => {
   const user = JSON.parse(localStorage.getItem("user"));
   if (!user) return;
@@ -44,13 +53,22 @@ export const Reader = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const token = JSON.parse(localStorage.getItem("token"));
+  const auth = { headers: { Authorization: `Bearer ${token}` } };
 
   const view = useRef(null);
+  /// Открыть книгу на конкретном месте: так из кабинета открывается цитата.
+  /// Своя закладка при этом не трогается — сюда пришли за другим.
+  const openAt = Number.parseFloat(
+    new URLSearchParams(location.search).get("at"),
+  );
+  const fromQuote = Number.isFinite(openAt) && openAt >= 0 && openAt < 1;
   /// доля книги, на которую надо встать после пересчёта страниц
-  const spot = useRef(savedSpot(filename));
+  const spot = useRef(fromQuote ? openAt : savedSpot(filename));
   /// первая страница каждой главы — для оглавления и подписи в шапке
   const starts = useRef([]);
   const touch = useRef(0);
+  /// листали ли в этот заход — см. сохранение закладки ниже
+  const moved = useRef(false);
   /// Жест тачпада: листали ли уже на этом жесте. Ref, а не состояние эффекта:
   /// обработчик переподписывается на каждой странице, и хвост инерции
   /// от предыдущей пролистал бы дальше.
@@ -63,6 +81,10 @@ export const Reader = () => {
   const [toc, setToc] = useState(false);
   /// страница, с которой ушли по ссылке, — чтобы вернуться из сноски
   const [back, setBack] = useState(null);
+  /// выделенное сейчас: {text, context} — из него делают цитату или карточку
+  const [sel, setSel] = useState(null);
+  /// короткий ответ на «сохранил» — гаснет сам
+  const [said, setSaid] = useState(null);
   const [font, setFont] = useState(
     () => Number(localStorage.getItem("readerFont")) || 20,
   );
@@ -70,11 +92,20 @@ export const Reader = () => {
 
   useEffect(() => {
     let alive = true;
-    axios
-      .get(`/api/read/${filename}`, {
-        headers: { Authorization: `Bearer ${token}` },
+    // Где читатель остановился, знает сервер, а не эта вкладка: сессия здесь
+    // могла открыться вчера, а читали с телефона. Своя закладка остаётся
+    // запасным вариантом — на случай, если сервер не ответит.
+    const where = fromQuote
+      ? Promise.resolve(null)
+      : axios.get(`/api/progress/${filename}`, auth).catch(() => null);
+
+    Promise.all([axios.get(`/api/read/${filename}`, auth), where])
+      .then(([read, progress]) => {
+        if (!alive) return;
+        const at = Number.parseFloat(progress?.data?.page);
+        if (Number.isFinite(at) && at >= 0 && at < 1) spot.current = at;
+        setBook(read.data);
       })
-      .then((r) => alive && setBook(r.data))
       .catch(
         (e) =>
           alive &&
@@ -162,6 +193,7 @@ export const Reader = () => {
     (to) => {
       const v = view.current;
       if (!v) return;
+      moved.current = true;
       const at = Math.max(0, Math.min(total - 1, to));
       v.scrollLeft = at * v.clientWidth;
       setPage(at);
@@ -250,6 +282,9 @@ export const Reader = () => {
   // из книги в первую же секунду терял бы страницу.
   useEffect(() => {
     if (!book || total <= 1) return;
+    // Пришли из цитаты и ещё не листали — это заглянуть, а не читать.
+    // Перебивать закладку, на которой человек остановился, за такое нельзя.
+    if (fromQuote && !moved.current) return;
     const frac = page / total;
     rememberSpot(filename, frac);
     const id = setTimeout(() => {
@@ -264,6 +299,45 @@ export const Reader = () => {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, total, book, filename]);
+
+  /// Что выделили. Выделение уже сделал браузер — нам остаётся забрать текст
+  /// и фразу вокруг него: сохранять слово без примера бессмысленно.
+  const grab = () => {
+    const selection = window.getSelection();
+    const text = String(selection).replace(/\s+/g, " ").trim();
+    if (!text) return setSel(null);
+
+    const around = (selection.anchorNode?.parentElement?.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const at = around.indexOf(text);
+    setSel({
+      text,
+      context:
+        at < 0
+          ? around.slice(0, CONTEXT * 2)
+          : around.slice(
+              Math.max(0, at - CONTEXT),
+              at + text.length + CONTEXT,
+            ),
+    });
+    setSaid(null);
+  };
+
+  /// Цитата и слово отличаются только адресом и телом запроса — отправка одна.
+  const keep = (url, body, ok) => {
+    axios
+      .post(url, { filename, ...body }, auth)
+      .then(() => {
+        setSaid(ok);
+        setSel(null);
+        window.getSelection().removeAllRanges();
+      })
+      .catch((e) => setSaid(e.response?.data?.message || t("saveFailed")))
+      // ponytail: таймер не чистим — он гасит подпись, а размонтированной
+      // читалке лишний setState ничего не ломает
+      .finally(() => setTimeout(() => setSaid(null), 2500));
+  };
 
   const pick = (size) => {
     setFont(size);
@@ -357,10 +431,12 @@ export const Reader = () => {
           className="readerViewport"
           ref={view}
           onClick={follow}
+          onMouseUp={grab}
           onTouchStart={(e) => (touch.current = e.changedTouches[0].clientX)}
           onTouchEnd={(e) => {
             const moved = e.changedTouches[0].clientX - touch.current;
             if (Math.abs(moved) > 40) go(page + (moved < 0 ? 1 : -1));
+            else grab();
           }}
         >
           {/* Разметку собирает сервер: теги только из его таблицы, весь текст
@@ -404,6 +480,46 @@ export const Reader = () => {
             </ol>
           </nav>
         )}
+
+        {/* Панель внизу, а не всплывашка у выделения: она никогда не закрывает
+            то, что выделили, и не нуждается в расчёте координат. */}
+        {sel && (
+          <div className="readerSel">
+            <span>{sel.text}</span>
+            <button
+              onClick={() =>
+                keep(
+                  "/api/quotes",
+                  { text: sel.text, position: String(page / total) },
+                  t("quoteSaved"),
+                )
+              }
+            >
+              {t("saveQuote")}
+            </button>
+            {ONE_WORD.test(sel.text) && (
+              <button
+                onClick={() =>
+                  keep(
+                    "/api/words",
+                    { word: sel.text, context: sel.context },
+                    t("wordSaved"),
+                  )
+                }
+              >
+                {t("saveWord")}
+              </button>
+            )}
+            <button
+              className="flat"
+              title={t("close")}
+              onClick={() => setSel(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {said && <div className="readerSaid">{said}</div>}
 
         {back !== null && back !== page && (
           <button

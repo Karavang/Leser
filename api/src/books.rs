@@ -136,7 +136,7 @@ impl Book {
 
 /// `filename` во внешнем API — это `{uuid}.{ext}`. Разбираем строго: наружу
 /// не собирается никакой путь, в запрос уходит только проверенный uuid.
-fn parse_filename(filename: &str) -> Result<(Uuid, String)> {
+pub fn parse_filename(filename: &str) -> Result<(Uuid, String)> {
     let (id, ext) = filename
         .rsplit_once('.')
         .ok_or_else(|| AppError::bad("Неверное имя файла", "Invalid filename"))?;
@@ -750,7 +750,42 @@ pub async fn page_was_flipped(
         e => e.into(),
     })?;
 
+    // История для статистики. Отдельным запросом и без транзакции: закладка
+    // важна, счётчик страниц — нет, и терять первое из-за второго незачем.
+    // Запрос в читалке дебаунсится, так что это примерно перевёрнутые страницы.
+    sqlx::query(
+        "insert into reading_days (user_id, day, pages) values ($1, current_date, 1)
+         on conflict (user_id, day) do update set pages = reading_days.pages + 1",
+    )
+    .bind(user.id)
+    .execute(&state.db)
+    .await?;
+
     Ok(StatusCode::OK)
+}
+
+/// Место в книге по мнению сервера. Раньше позицию знал только вход
+/// (`user.pages` в localStorage), поэтому устройство с уже открытой сессией
+/// показывало вчерашнюю страницу. Читалка спрашивает при открытии книги.
+pub async fn progress_of(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(filename): Path<String>,
+) -> Result<Json<serde_json::Value>> {
+    let (book_id, _) = parse_filename(&filename)?;
+
+    let row: Option<(String,)> = sqlx::query_as(
+        "select position from reading_progress where user_id = $1 and book_id = $2",
+    )
+    .bind(user.id)
+    .bind(book_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    // Книгу ещё не открывали — это не ошибка, а начало книги.
+    Ok(Json(
+        serde_json::json!({ "page": row.map(|(position,)| position) }),
+    ))
 }
 
 #[cfg(test)]
