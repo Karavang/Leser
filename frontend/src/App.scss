@@ -18,6 +18,8 @@
   --ink: #2b2415;
   --dim: #7a6c48;
   --line: #bfbfbf;
+  // блик, бегущий по скелету загрузки
+  --gleam: rgba(255, 255, 255, 0.35);
 }
 
 :root.day {
@@ -38,6 +40,7 @@
   --ink: #c7c2b6;
   --dim: #6a7280;
   --line: #333b47;
+  --gleam: rgba(255, 255, 255, 0.06);
   --ok: #6dbf73;
   --danger: #ef6b5e;
 }
@@ -557,11 +560,129 @@ li {
   }
 }
 
-.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
+// ── загрузка ──────────────────────────────────────────────────────────────
+// Скелеты (ui/Loading.jsx): серые полосы там, где встанет содержимое, и блик,
+// который по ним пробегает. Цвет полос — чернила на 12%, поэтому одинаково
+// живёт на бумаге и в ночной теме.
+.skeleton {
+  b,
+  i {
+    display: block;
+    position: relative;
+    overflow: hidden;
+    height: 8px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--ink) 12%, transparent);
+    // блик по самой полосе: на контейнере он светил бы и в промежутках
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(100deg, transparent 20%, var(--gleam) 50%, transparent 80%);
+      transform: translateX(-100%);
+      animation: gleam 1.6s ease-in-out infinite;
+    }
+  }
+  b {
+    height: 12px;
+  }
+
+  // карточки библиотеки: сетка от .bookList, но без наведения — жать не на что.
+  // Селектор той же силы, что .bookList ul li, иначе space-between оттуда
+  // разводит заголовок и автора по краям карточки.
+  ul li {
+    cursor: default;
+    justify-content: flex-start;
+    gap: 10px;
+    box-shadow: none;
+    &:hover {
+      transform: none;
+    }
+  }
+
+  .readerBar {
+    min-height: 40px;
+    justify-content: space-between;
+  }
+  .readerFoot {
+    min-height: 26px;
+  }
+}
+
+.skeletonPages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  // start: колонка высотой в свои строки, а не во весь экран — иначе блик
+  // пробегает по пустому полю под текстом
+  align-items: start;
+  gap: 0 calc(var(--pad) * 2);
+  padding: 24px var(--pad);
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  i {
+    height: 7px;
+  }
+  // на узком экране разворота нет — вторую колонку прячем, как читалка
+  @media (max-width: 720px) {
+    > div + div {
+      display: none;
+    }
+  }
+}
+
+// Бегущая полоса: в подвале скелета читалки — на месте прогресса по книге,
+// и с классом .top — под верхним краем страницы, поверх уже показанного.
+.busyLine {
+  display: block;
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  &::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 35%;
+    border-radius: 2px;
+    background: var(--back-orange);
+    animation: run 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  &.top {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    border-radius: 0;
+    background: none;
+  }
+}
+
+@keyframes gleam {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes run {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton b::after,
+  .skeleton i::after,
+  .busyLine::after {
+    animation: none;
+  }
 }
 // Поиск и вкладки остаются на экране при прокрутке списка. Фон обязателен:
 // без него карточки просвечивали бы сквозь шапку. Отрицательные поля тянут

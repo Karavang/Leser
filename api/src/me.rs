@@ -38,7 +38,11 @@ fn cut(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
-    s.chars().take(max).collect::<String>().trim_end().to_string()
+    s.chars()
+        .take(max)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
 }
 
 // ── цитаты ────────────────────────────────────────────────────────────────
@@ -225,7 +229,10 @@ pub async fn add_word(
     .bind(user.id)
     .bind(book_id)
     .bind(&word)
-    .bind(cut(body.context.as_deref().unwrap_or_default(), MAX_CONTEXT))
+    .bind(cut(
+        body.context.as_deref().unwrap_or_default(),
+        MAX_CONTEXT,
+    ))
     .bind(&lang)
     .fetch_one(&state.db)
     .await?;
@@ -303,10 +310,7 @@ pub async fn stats(
             .bind(user.id)
             .fetch_all(&state.db)
             .await?;
-    let finished = positions
-        .iter()
-        .filter(|(p,)| frac(p) >= FINISHED)
-        .count();
+    let finished = positions.iter().filter(|(p,)| frac(p) >= FINISHED).count();
 
     let days: Vec<NaiveDate> = rows.iter().map(|(d, _)| *d).collect();
     Ok(Json(serde_json::json!({

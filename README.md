@@ -167,6 +167,40 @@ GITHUB_TOKEN=ghp_...
 
 Без него источник просто выключается, остальное работает.
 
+## На VPS
+
+Тот же compose, только снаружи nginx с TLS. Нужны Docker и git, остальное
+живёт в контейнерах:
+
+```sh
+git clone https://github.com/Karavang/Leser.git && cd Leser
+cp .env.example .env
+# в .env: JWT_SECRET и POSTGRES_PASSWORD — по openssl rand -hex 32,
+# FRONTEND_PORT=127.0.0.1:8081, чтобы приложение слушало только loopback
+docker compose up -d --build
+```
+
+Порты базы и api и так привязаны к `127.0.0.1`; наружу смотрит только
+фронт, а перед ним — nginx хоста:
+
+```sh
+apt install nginx certbot python3-certbot-nginx
+cp deploy/nginx.prod.conf /etc/nginx/sites-available/leser   # поправить server_name
+ln -s /etc/nginx/sites-available/leser /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d leser.cloud -d www.leser.cloud
+```
+
+`restart: unless-stopped` поднимает контейнеры после перезагрузки сервера.
+Обновление — `git pull && docker compose up -d --build`; миграции применятся
+сами. Вся библиотека, включая файлы книг, лежит в томе `pgdata`, так что
+бэкап — один дамп:
+
+```sh
+docker compose exec db pg_dump -U leser -Fc leser > leser-$(date +%F).dump
+docker compose exec -T db pg_restore -U leser -d leser --clean < leser-....dump
+```
+
 ## Как устроено
 
 ```mermaid

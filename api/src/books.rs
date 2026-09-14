@@ -774,13 +774,12 @@ pub async fn progress_of(
 ) -> Result<Json<serde_json::Value>> {
     let (book_id, _) = parse_filename(&filename)?;
 
-    let row: Option<(String,)> = sqlx::query_as(
-        "select position from reading_progress where user_id = $1 and book_id = $2",
-    )
-    .bind(user.id)
-    .bind(book_id)
-    .fetch_optional(&state.db)
-    .await?;
+    let row: Option<(String,)> =
+        sqlx::query_as("select position from reading_progress where user_id = $1 and book_id = $2")
+            .bind(user.id)
+            .bind(book_id)
+            .fetch_optional(&state.db)
+            .await?;
 
     // Книгу ещё не открывали — это не ошибка, а начало книги.
     Ok(Json(

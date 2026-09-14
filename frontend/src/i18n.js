@@ -9,6 +9,7 @@ export const RU = {
   toLibrary: "К библиотеке",
   close: "Закрыть",
   loading: "Загрузка",
+  loadingBook: "Открываю книгу",
   profile: "Профиль",
 
   // библиотека
@@ -127,6 +128,7 @@ export const EN = {
   toLibrary: "To the library",
   close: "Close",
   loading: "Loading",
+  loadingBook: "Opening the book",
   profile: "Profile",
 
   tabLibrary: "Library",

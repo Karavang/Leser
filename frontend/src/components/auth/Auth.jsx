@@ -7,7 +7,9 @@ import { lang, t } from "../../i18n";
 const Auth = () => {
   const navigate = useNavigate();
   const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  const passwordPattern = /^[A-Za-z0-9]{8,}$/;
+  // Только длина, как и на сервере: запрет на «!» и пробел делал пароли
+  // слабее, а не сильнее.
+  const passwordPattern = /^.{8,}$/;
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

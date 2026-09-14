@@ -7,7 +7,7 @@ import { SearchingLine } from "./components/SearchingLine";
 import { SourceResults } from "./components/SourceResults";
 import UserButton from "./components/UserButton";
 import UpButton from "./ui/UpButton";
-import { Loading } from "./ui/Loading";
+import { BusyLine, Loading } from "./ui/Loading";
 import { clearSession } from "./session";
 import { t } from "./i18n";
 
@@ -17,6 +17,8 @@ export const Home = () => {
   const [filter, setFilter] = useState("");
   const [tab, setTab] = useState("library");
   const [loading, setLoading] = useState(true);
+  // повторные запросы — поиск, вкладка, возврат — идут поверх показанного списка
+  const [busy, setBusy] = useState(false);
   const [upButtonShow, setUpButtonShow] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -38,6 +40,7 @@ export const Home = () => {
   // пауза перед запросом, чтобы не слать его на каждую нажатую букву.
   useEffect(() => {
     const timer = setTimeout(async () => {
+      setBusy(true);
       try {
         const response = await axios.get("/api/getAll", {
           params: filter.trim() ? { q: filter.trim() } : {},
@@ -52,6 +55,7 @@ export const Home = () => {
         }
       } finally {
         setLoading(false);
+        setBusy(false);
       }
     }, 250);
     return () => clearTimeout(timer);
@@ -121,10 +125,9 @@ export const Home = () => {
     );
   }, []);
 
-  if (loading) return <Loading />;
-
   return (
     <div>
+      {busy && !loading && <BusyLine />}
       {/* Всё, кроме списка, остаётся на экране при прокрутке. Одна липкая
           обёртка вместо двух: иначе второй пришлось бы вручную считать
           отступ на высоту первой. */}
@@ -149,11 +152,15 @@ export const Home = () => {
           </button>
         </div>
       </div>
-      <BooksList
-        books={shownBooks}
-        onDeleted={onDeleted}
-        onShelf={onShelf}
-      />
+      {loading ? (
+        <Loading />
+      ) : (
+        <BooksList
+          books={shownBooks}
+          onDeleted={onDeleted}
+          onShelf={onShelf}
+        />
+      )}
       {tab === "library" && (
         <SourceResults
           found={found}

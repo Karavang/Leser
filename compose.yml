@@ -1,12 +1,15 @@
 services:
   db:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: leser
-      POSTGRES_PASSWORD: leser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leser}
       POSTGRES_DB: leser
-    # Порт наружу — чтобы ходить psql'ем и запускать api локально через cargo run.
-    ports: ["5432:5432"]
+    # Порт только на loopback: чтобы ходить psql'ем и запускать api локально
+    # через cargo run. На VPS наружу не торчит — база с паролем «leser»
+    # в открытом интернете живёт минуты.
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U leser"]
@@ -15,21 +18,26 @@ services:
 
   api:
     build: ./api
-    ports: ["4444:4444"]
+    restart: unless-stopped
+    # Тоже только loopback: снаружи к api ходят через nginx фронта.
+    ports: ["127.0.0.1:4444:4444"]
     environment:
-      DATABASE_URL: postgres://leser:leser@db:5432/leser
+      DATABASE_URL: postgres://leser:${POSTGRES_PASSWORD:-leser}@db:5432/leser
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       # Фронт ходит через nginx того же origin, так что CORS нужен только
       # для vite dev-сервера на хосте.
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       # Пусто — источник GitHub просто выключен, Gutenberg работает без ключей.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      RUST_LOG: ${RUST_LOG:-leser_api=info,tower_http=info}
     depends_on:
       db: { condition: service_healthy }
 
   frontend:
     build: ./frontend
-    # 8080 на этой машине занят чужим контейнером, поэтому 8081 и переопределение.
+    restart: unless-stopped
+    # Единственная дверь снаружи. На VPS перед ней nginx/caddy с TLS —
+    # deploy/nginx.prod.conf; тогда тоже 127.0.0.1:8081.
     ports: ["${FRONTEND_PORT:-8081}:80"]
     depends_on: [api]
 

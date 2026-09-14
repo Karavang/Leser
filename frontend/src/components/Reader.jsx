@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Loading } from "../ui/Loading.jsx";
+import { LoadingBook } from "../ui/Loading.jsx";
 import { t } from "../i18n";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
@@ -358,7 +358,7 @@ export const Reader = () => {
         </div>
       </div>
     );
-  if (!book) return <Loading />;
+  if (!book) return <LoadingBook theme={theme} />;
 
   let chapter = 0;
   starts.current.forEach((at, i) => {
