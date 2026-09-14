@@ -74,6 +74,8 @@ struct Head {
     name: (usize, usize),
     /// где в файле начинается EXTH, если он вообще есть
     exth: Option<usize>,
+    /// номер записи с индексом NCX — оглавлением книги
+    ncx: usize,
 }
 
 fn head(r0: &[u8]) -> Result<Head> {
@@ -123,7 +125,120 @@ fn head(r0: &[u8]) -> Result<Head> {
         name: (at(0x44)?, at(0x48)?),
         // EXTH идёт сразу за MOBI-заголовком и только если о нём сказано
         exth: (at(0x70)? & 0x40 != 0).then_some(MOBI + len),
+        ncx: at(0xe4)?,
     })
+}
+
+/// Пункт оглавления: где в тексте начинается и как называется.
+struct Entry {
+    pos: usize,
+    label: String,
+}
+
+/// Число переменной длины «вперёд»: по семь бит на байт, старший бит
+/// стоит у последнего. Не путать с хвостами записей — там то же, но с конца.
+fn varint(d: &[u8], p: &mut usize) -> Option<usize> {
+    let mut v = 0usize;
+    for _ in 0..5 {
+        let c = *d.get(*p)?;
+        *p += 1;
+        v = (v << 7) | (c & 0x7f) as usize;
+        if c & 0x80 != 0 {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Оглавление из индекса NCX. Это то же оглавление, что показывает Kindle:
+/// названия и позиции глав, записанные тем, кто книгу собирал. Резать
+/// по нему честнее, чем угадывать заголовки по жирному шрифту — в старом
+/// mobi тегов заголовков нет вовсе.
+///
+/// Формат: главная запись INDX с таблицей тегов TAGX, за ней записи
+/// с пунктами и записи CNCX со строками названий. У пункта — байт длины
+/// имени, имя, контрольный байт и значения тегов подряд, по маске из TAGX.
+/// Нужны два тега: 1 — позиция в тексте, 3 — смещение названия в CNCX.
+/// Остальные пропускаются по описанию. Битый индекс — `None`: книга тогда
+/// режется по заголовкам, как и без индекса. Ничего здесь не паникует:
+/// каждое чтение — `get`.
+fn ncx(recs: &[&[u8]], h: &Head) -> Option<Vec<Entry>> {
+    let main = *recs.get(h.ncx)?;
+    if main.get(..4)? != b"INDX" {
+        return None;
+    }
+    let hlen = u32at(main, 4).ok()?;
+    let count = u32at(main, 24).ok()?.min(64);
+    let ncncx = u32at(main, 52).ok()?.min(64);
+
+    if main.get(hlen..hlen + 4)? != b"TAGX" {
+        return None;
+    }
+    let tagx_len = u32at(main, hlen + 4).ok()?;
+    let ctrl = u32at(main, hlen + 8).ok()?;
+    // (тег, сколько значений, бит в контрольном байте) — до первой отметки конца
+    let mut tags: Vec<(u8, usize, u8)> = Vec::new();
+    let mut at = hlen + 12;
+    while at + 4 <= hlen + tagx_len {
+        let t = main.get(at..at + 4)?;
+        if t[3] & 1 != 0 {
+            break;
+        }
+        tags.push((t[0], t[1] as usize, t[2]));
+        at += 4;
+    }
+
+    let cncx: Vec<u8> = (0..ncncx)
+        .filter_map(|i| recs.get(h.ncx + 1 + count + i))
+        .flat_map(|r| r.iter().copied())
+        .collect();
+    let label = |off: usize| -> Option<String> {
+        let mut p = off;
+        let n = varint(&cncx, &mut p)?;
+        Some(
+            String::from_utf8_lossy(cncx.get(p..p + n)?)
+                .trim()
+                .to_string(),
+        )
+    };
+
+    let mut out = Vec::new();
+    for r in 0..count {
+        let d = *recs.get(h.ncx + 1 + r)?;
+        if d.get(..4)? != b"INDX" {
+            return None;
+        }
+        let idxt = u32at(d, 20).ok()?;
+        let n = u32at(d, 24).ok()?.min(4096);
+        if d.get(idxt..idxt + 4)? != b"IDXT" {
+            return None;
+        }
+        for i in 0..n {
+            let off = u16at(d, idxt + 4 + 2 * i).ok()?;
+            let name_len = *d.get(off)? as usize;
+            let mut p = off + 1 + name_len;
+            let control = *d.get(p)?;
+            p += ctrl;
+            let (mut pos, mut name) = (None, None);
+            for &(tag, values, mask) in &tags {
+                if control & mask == 0 {
+                    continue;
+                }
+                for _ in 0..values {
+                    let v = varint(d, &mut p)?;
+                    match tag {
+                        1 => pos = Some(v),
+                        3 => name = label(v),
+                        _ => {}
+                    }
+                }
+            }
+            if let (Some(pos), Some(label)) = (pos, name) {
+                out.push(Entry { pos, label });
+            }
+        }
+    }
+    Some(out)
 }
 
 /// Хвост текстовой записи: за самим текстом могут лежать служебные куски —
@@ -269,14 +384,49 @@ fn image(src: &str, recs: &[&[u8]], first: usize) -> Option<(String, String)> {
 pub fn chapters(bytes: &[u8]) -> Result<Vec<Chapter>> {
     let recs = records(bytes)?;
     let h = head(recs.first().copied().ok_or_else(broken)?)?;
-    let html = decode(&text(&recs, &h)?, encoding(h.encoding));
+    let raw = text(&recs, &h)?;
+    let enc = encoding(h.encoding);
 
     let first = h.first_image;
     // 0 и «все единицы» одинаково значат «картинок нет»
     let has_images = first > 0 && first < recs.len();
-    crate::reader::single_html(&html, &mut |src| {
-        has_images.then(|| image(src, &recs, first)).flatten()
-    })
+    let mut image = |src: &str| has_images.then(|| image(src, &recs, first)).flatten();
+
+    let Some(toc) = ncx(&recs, &h).filter(|t| !t.is_empty()) else {
+        return crate::reader::single_html(&decode(&raw, enc), &mut image);
+    };
+
+    // Пункты из одного номера — подразделы «1», «2», «3» внутри главы,
+    // они остаются в тексте своей главы. Книга, где все главы — номера,
+    // режется по ним: другого оглавления у неё нет.
+    let mut toc: Vec<Entry> = if toc.iter().all(|e| crate::reader::numeric_label(&e.label)) {
+        toc
+    } else {
+        toc.into_iter()
+            .filter(|e| !crate::reader::numeric_label(&e.label))
+            .collect()
+    };
+    // индекс записан по уровням, а не по порядку в тексте
+    toc.sort_by_key(|e| e.pos);
+    toc.dedup_by_key(|e| e.pos);
+
+    let mut pieces = Vec::new();
+    let mut from = 0;
+    let mut title = String::new();
+    for e in toc {
+        let mut at = e.pos.min(raw.len());
+        // позиция указывает на тег, но на всякий случай не рвём символ utf-8
+        while h.encoding == 65001 && at > from && raw.get(at).is_some_and(|b| b & 0xc0 == 0x80) {
+            at -= 1;
+        }
+        if at > from {
+            pieces.push((std::mem::take(&mut title), decode(&raw[from..at], enc)));
+            from = at;
+        }
+        title = e.label;
+    }
+    pieces.push((title, decode(&raw[from..], enc)));
+    crate::reader::html_pieces(pieces, &mut image)
 }
 
 /// Метаданные из EXTH — списка записей «номер, длина, значение» в конце
@@ -355,6 +505,63 @@ mod tests {
     /// и текст, сжатый тем же LZ77. Проверять разбор чужого формата больше
     /// нечем — файла из магазина в тестах взяться неоткуда.
     fn build(text: &str, compressed: bool) -> Vec<u8> {
+        build_with(text, compressed, &[])
+    }
+
+    /// Число переменной длины «вперёд», как пишет его сам формат.
+    fn fwd(mut v: usize) -> Vec<u8> {
+        let mut out = vec![(v & 0x7f) as u8 | 0x80];
+        v >>= 7;
+        while v > 0 {
+            out.insert(0, (v & 0x7f) as u8);
+            v >>= 7;
+        }
+        out
+    }
+
+    /// Индекс NCX тремя записями: главная с TAGX, пункты с IDXT, строки CNCX.
+    fn ncx_records(toc: &[(usize, &str)]) -> Vec<Vec<u8>> {
+        let hlen = 56usize;
+        let mut main = vec![0u8; hlen];
+        main[0..4].copy_from_slice(b"INDX");
+        main[4..8].copy_from_slice(&(hlen as u32).to_be_bytes());
+        main[24..28].copy_from_slice(&1u32.to_be_bytes()); // одна запись с пунктами
+        main[52..56].copy_from_slice(&1u32.to_be_bytes()); // одна запись CNCX
+                                                           // теги: 1 — позиция, 3 — название, 4 — глубина, 21 — родитель
+        let tags: &[u8] = &[1, 1, 1, 0, 3, 1, 4, 0, 4, 1, 8, 0, 21, 1, 16, 0, 0, 0, 0, 1];
+        main.extend_from_slice(b"TAGX");
+        main.extend_from_slice(&((12 + tags.len()) as u32).to_be_bytes());
+        main.extend_from_slice(&1u32.to_be_bytes()); // один контрольный байт
+        main.extend_from_slice(tags);
+
+        let mut cncx = Vec::new();
+        let mut entries = vec![0u8; hlen];
+        entries[0..4].copy_from_slice(b"INDX");
+        entries[4..8].copy_from_slice(&(hlen as u32).to_be_bytes());
+        let mut offsets = Vec::new();
+        for (i, (pos, label)) in toc.iter().enumerate() {
+            offsets.push(entries.len() as u16);
+            let name = format!("{i:08}");
+            entries.push(name.len() as u8);
+            entries.extend_from_slice(name.as_bytes());
+            entries.push(1 | 4 | 8); // позиция, название, глубина; родителя нет
+            entries.extend(fwd(*pos));
+            entries.extend(fwd(cncx.len()));
+            cncx.extend(fwd(label.len()));
+            cncx.extend_from_slice(label.as_bytes());
+            entries.extend(fwd(0));
+        }
+        let idxt = entries.len();
+        entries[20..24].copy_from_slice(&(idxt as u32).to_be_bytes());
+        entries[24..28].copy_from_slice(&(toc.len() as u32).to_be_bytes());
+        entries.extend_from_slice(b"IDXT");
+        for o in offsets {
+            entries.extend_from_slice(&o.to_be_bytes());
+        }
+        vec![main, entries, cncx]
+    }
+
+    fn build_with(text: &str, compressed: bool, toc: &[(usize, &str)]) -> Vec<u8> {
         let title = b"Test Book";
         let author = b"Test Author";
 
@@ -378,6 +585,14 @@ mod tests {
         mobi[0x44..0x48].copy_from_slice(&(name_off as u32).to_be_bytes());
         mobi[0x48..0x4c].copy_from_slice(&(title.len() as u32).to_be_bytes());
         mobi[0x70..0x74].copy_from_slice(&0x40u32.to_be_bytes()); // EXTH есть
+        let extra = if toc.is_empty() {
+            Vec::new()
+        } else {
+            ncx_records(toc)
+        };
+        // индекс — сразу за текстом, запись номер два
+        mobi[0xe4..0xe8]
+            .copy_from_slice(&(if extra.is_empty() { u32::MAX } else { 2 }).to_be_bytes());
 
         let body = text.as_bytes();
         let mut packed = Vec::new();
@@ -399,17 +614,21 @@ mod tests {
         r0.extend_from_slice(&exth);
         r0.extend_from_slice(title);
 
+        let mut records = vec![r0, packed];
+        records.extend(extra);
         let mut out = vec![0u8; PDB];
         out[60..64].copy_from_slice(b"BOOK");
         out[64..68].copy_from_slice(b"MOBI");
-        out[76..78].copy_from_slice(&2u16.to_be_bytes()); // две записи
-        let first = PDB + 2 * 8;
-        out.extend_from_slice(&(first as u32).to_be_bytes());
-        out.extend_from_slice(&[0, 0, 0, 0]);
-        out.extend_from_slice(&((first + r0.len()) as u32).to_be_bytes());
-        out.extend_from_slice(&[0, 0, 0, 1]);
-        out.extend_from_slice(&r0);
-        out.extend_from_slice(&packed);
+        out[76..78].copy_from_slice(&(records.len() as u16).to_be_bytes());
+        let mut at = PDB + records.len() * 8;
+        for (i, r) in records.iter().enumerate() {
+            out.extend_from_slice(&(at as u32).to_be_bytes());
+            out.extend_from_slice(&(i as u32).to_be_bytes());
+            at += r.len();
+        }
+        for r in &records {
+            out.extend_from_slice(r);
+        }
         out
     }
 
@@ -431,6 +650,45 @@ mod tests {
             assert!(ch[0].html.contains("<p>Первая.</p>"), "{:?}", ch[0]);
             assert_eq!(ch[1].title, "Глава 2");
         }
+    }
+
+    /// Старый mobi без тегов заголовков: главы — только в индексе NCX.
+    /// Режем по нему; подразделы «1», «2» остаются внутри своей главы,
+    /// а то, что до первой главы, приклеивается к ней.
+    #[test]
+    fn ncx_index_is_the_table_of_contents() {
+        let text = "<html><body><p>Титул</p>\
+                    <p><b>Глава 1</b></p><p>раз</p>\
+                    <p><b>2</b></p><p>два</p>\
+                    <p><b>Глава 2</b></p><p>три</p></body></html>";
+        let at = |s: &str| text.find(s).unwrap();
+        let toc = [
+            (at("<p><b>Глава 1"), "Глава 1"),
+            (at("<p><b>2"), "2"),
+            (at("<p><b>Глава 2"), "Глава 2"),
+        ];
+        for compressed in [false, true] {
+            let ch = crate::reader::chapters("mobi", &build_with(text, compressed, &toc)).unwrap();
+            let titles: Vec<&str> = ch.iter().map(|c| c.title.as_str()).collect();
+            assert_eq!(titles, ["Глава 1", "Глава 2"], "{ch:?}");
+            assert!(ch[0].html.starts_with("<p>Титул</p>"), "{}", ch[0].html);
+            assert!(ch[0].html.contains("<p>два</p>"), "{}", ch[0].html);
+            assert!(ch[1].html.contains("<p>три</p>"), "{}", ch[1].html);
+        }
+
+        // все главы — номера: другого оглавления нет, режем по ним
+        // (титул до первой главы здесь ещё отдельный — склейка живёт выше,
+        // в reader::chapters)
+        let toc = [(at("<p><b>Глава 1"), "1"), (at("<p><b>Глава 2"), "2")];
+        let ch = chapters(&build_with(text, true, &toc)).unwrap();
+        let titles: Vec<&str> = ch.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["", "1", "2"], "{ch:?}");
+
+        // битый индекс — не ошибка: книга режется по заголовкам, как без него
+        let mut file = build_with(text, true, &toc);
+        let n = file.len();
+        file[n - 40..].fill(0xff);
+        assert!(chapters(&file).is_ok());
     }
 
     /// Сжатие обязано выдержать ссылку назад и «пробел плюс буква» —

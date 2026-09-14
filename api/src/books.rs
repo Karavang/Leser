@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -282,6 +282,16 @@ pub async fn download_one(
 ///
 /// Разбор синхронный и на большой книге не мгновенный — как и в parse.rs,
 /// он уходит в blocking-пул, чтобы не держать поток рантайма.
+/// Версия разбора книги. Поднимать при каждом изменении `reader.rs`/`mobi.rs`,
+/// которое меняет результат: все документы в `book_docs` с меньшей версией
+/// пересоберутся при первом открытии, а браузеры, у которых книга лежит
+/// в кэше, получат новую по ETag.
+pub const DOC_VERSION: i32 = 2;
+
+fn doc_etag(id: Uuid) -> String {
+    format!("\"v{DOC_VERSION}-{id}\"")
+}
+
 async fn reader_doc(
     ext: &str,
     bytes: axum::body::Bytes,
@@ -320,38 +330,57 @@ pub async fn read_one(
     State(state): State<Arc<AppState>>,
     _user: AuthUser,
     Path(filename): Path<String>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse> {
     let (id, ext) = parse_filename(&filename)?;
 
+    // Файл книги неизменяем (на каждую загрузку новый id), значит разбор
+    // меняется только вместе с версией парсера — она и есть ETag. Совпал —
+    // до базы не доходим и тело не шлём. Раньше тут стоял `immutable` на год,
+    // и поумневший парсер до читателя не доезжал: браузер не спрашивал.
+    let etag = doc_etag(id);
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .is_some_and(|v| v.as_bytes() == etag.as_bytes())
+    {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [(header::ETAG, etag)],
+            String::new(),
+        )
+            .into_response());
+    }
+
     let doc: Option<(String,)> = sqlx::query_as(
         "select d.doc from book_docs d join books b on b.id = d.book_id
-         where d.book_id = $1 and b.ext = $2",
+         where d.book_id = $1 and b.ext = $2 and d.version = $3",
     )
     .bind(id)
     .bind(&ext)
+    .bind(DOC_VERSION)
     .fetch_optional(&state.db)
     .await?;
 
     let doc = match doc {
         Some((doc,)) => doc,
         // Книга легла в библиотеку раньше, чем появился разбор при загрузке,
-        // или book_docs почистили ради пересборки. Собираем и запоминаем —
+        // или разбор устарел вместе с версией парсера. Собираем и запоминаем —
         // второй раз этого уже не потребуется.
         None => rebuild_doc(&state, id, &ext).await?,
     };
 
     Ok((
         [
-            (header::CONTENT_TYPE, "application/json"),
-            // Файл книги неизменяем (на каждую загрузку новый id), значит и разбор
-            // тоже: второе открытие книги до сервера не доходит вовсе.
-            (
-                header::CACHE_CONTROL,
-                "private, max-age=31536000, immutable",
-            ),
+            (header::CONTENT_TYPE, "application/json".to_string()),
+            // no-cache — это «спроси, прежде чем брать из кэша»: запрос
+            // с If-None-Match уходит всегда, но тело едет только при новой
+            // версии разбора.
+            (header::CACHE_CONTROL, "private, no-cache".to_string()),
+            (header::ETAG, etag),
         ],
         doc,
-    ))
+    )
+        .into_response())
 }
 
 async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
@@ -370,11 +399,12 @@ async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
 
     let doc = reader_doc(ext, data.into(), &title, &author, &lang).await?;
     sqlx::query(
-        "insert into book_docs (book_id, doc) values ($1, $2)
-         on conflict (book_id) do update set doc = excluded.doc",
+        "insert into book_docs (book_id, doc, version) values ($1, $2, $3)
+         on conflict (book_id) do update set doc = excluded.doc, version = excluded.version",
     )
     .bind(id)
     .bind(&doc)
+    .bind(DOC_VERSION)
     .execute(&state.db)
     .await?;
     Ok(doc)
@@ -494,9 +524,10 @@ async fn store_book(
         .execute(&mut *tx)
         .await?;
 
-    sqlx::query("insert into book_docs (book_id, doc) values ($1, $2)")
+    sqlx::query("insert into book_docs (book_id, doc, version) values ($1, $2, $3)")
         .bind(id)
         .bind(&doc)
+        .bind(DOC_VERSION)
         .execute(&mut *tx)
         .await?;
 

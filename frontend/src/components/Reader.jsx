@@ -99,7 +99,13 @@ export const Reader = () => {
       ? Promise.resolve(null)
       : axios.get(`/api/progress/${filename}`, auth).catch(() => null);
 
-    Promise.all([axios.get(`/api/read/${filename}`, auth), where])
+    // no-cache в запросе — «сверь с сервером»: у кого книга лежала в кэше
+    // с прежним годовым immutable, тот иначе новый разбор не увидит никогда.
+    // Сервер отвечает 304 по ETag, тело едет только при новой версии.
+    const fresh = {
+      headers: { ...auth.headers, "Cache-Control": "no-cache" },
+    };
+    Promise.all([axios.get(`/api/read/${filename}`, fresh), where])
       .then(([read, progress]) => {
         if (!alive) return;
         const at = Number.parseFloat(progress?.data?.page);

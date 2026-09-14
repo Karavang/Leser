@@ -290,6 +290,7 @@ pub fn chapters(ext: &str, bytes: &[u8]) -> Result<Vec<Chapter>> {
     chapters.truncate(MAX_CHAPTERS);
     // Пустая глава — это не глава: в оглавлении она строка, ведущая никуда.
     chapters.retain(|c| !c.html.trim().is_empty());
+    let chapters = merge_untitled(chapters);
     if chapters.is_empty() {
         return Err(AppError::bad(
             "В книге не нашлось текста",
@@ -297,6 +298,55 @@ pub fn chapters(ext: &str, bytes: &[u8]) -> Result<Vec<Chapter>> {
         ));
     }
     Ok(chapters)
+}
+
+/// Глава без названия среди глав с названиями — не глава, а продолжение
+/// предыдущей: эпиграф отдельной секцией и «* * *» в fb2, вторая половина
+/// длинной главы в epub. В оглавлении им делать нечего — приклеиваем
+/// к предыдущей. Первая без названия (обложка, титул) приклеивается
+/// к следующей. Книга совсем без названий не трогается: там нумерация
+/// частей и есть оглавление.
+///
+/// Сноска тоже не глава. В fb2 она отличима по телу `notes`, а конвертеры
+/// (Calibre) кладут каждую отдельным файлом с пунктом «1», «2», «3»
+/// в оглавлении — поэтому крошечная глава с чисто числовым названием
+/// считается сноской и уходит в предыдущую подзаголовком.
+fn merge_untitled(chapters: Vec<Chapter>) -> Vec<Chapter> {
+    if chapters.iter().all(|c| c.title.is_empty()) {
+        return chapters;
+    }
+    let mut out: Vec<Chapter> = Vec::with_capacity(chapters.len());
+    for mut c in chapters {
+        if is_note(&c) {
+            c.html = c.html.replace("<h2>", "<h3>").replace("</h2>", "</h3>");
+            c.title.clear();
+        }
+        match out.last_mut() {
+            Some(prev) if c.title.is_empty() => prev.html.push_str(&c.html),
+            _ => out.push(c),
+        }
+    }
+    if out.len() > 1 && out[0].title.is_empty() {
+        let cover = out.remove(0);
+        out[0].html.insert_str(0, &cover.html);
+    }
+    out
+}
+
+/// ponytail: «1», «[2]», «3.» короче двух килобайт — сноска. Настоящая глава
+/// с номером вместо названия такой короткой не бывает.
+fn is_note(c: &Chapter) -> bool {
+    c.html.len() < 2000 && numeric_label(&c.title)
+}
+
+/// Название из одного номера: «1», «[2]», «3.». Так подписывают сноски
+/// и подразделы внутри главы, а не главы.
+pub(crate) fn numeric_label(t: &str) -> bool {
+    let t = t.trim();
+    !t.is_empty()
+        && t.chars().any(|c| c.is_ascii_digit())
+        && t.chars()
+            .all(|c| c.is_ascii_digit() || !c.is_alphanumeric())
 }
 
 // ── fb2 ──────────────────────────────────────────────────────────────────
@@ -337,6 +387,9 @@ struct Fb2 {
     skip: usize,
     section: usize,
     in_title: usize,
+    /// внутри `<body name="notes">` (или comments, footnotes): сноски — одна
+    /// глава на всё тело, а не по главе на каждую
+    notes: bool,
     /// байты картинок: id из `<binary>` в порядке появления `<image>`
     refs: Vec<String>,
     bins: HashMap<String, (String, String)>,
@@ -365,6 +418,13 @@ impl Fb2 {
             return;
         }
 
+        // Новая глава начинается раньше всего остального. Иначе якорь
+        // секции (ниже) лёг бы в буфер до сброса — в хвост предыдущей главы,
+        // а из пустого буфера с одним якорем родилась бы глава без текста.
+        if name == "section" && self.section == 0 && !self.notes {
+            self.flush();
+        }
+
         // Цель ссылки может стоять на чём угодно — на секции, на абзаце,
         // на теге, который мы выкидываем. Поэтому ставим её до разбора тега.
         if let Some(id) = attr(e, "id").filter(|_| name != "binary") {
@@ -373,6 +433,14 @@ impl Fb2 {
         }
 
         match name.as_str() {
+            // Тело — граница главы всегда. Именованное тело — это сноски
+            // или комментарии: у него одна глава с названием тела, а секции
+            // внутри — подзаголовки, чтобы «1», «2», «3» не стали главами.
+            "body" => {
+                self.flush();
+                self.notes = attr(e, "name").is_some_and(|n| !n.is_empty());
+                self.opened.push(Open::Through);
+            }
             // Ссылка внутрь книги — оглавление в аннотации, сноска, перекрёстная
             // ссылка. Наружу (`http://`, `mailto:`) не ведём вовсе: адрес в fb2
             // пишет кто угодно, а текст ссылки при этом остаётся на месте.
@@ -392,15 +460,13 @@ impl Fb2 {
                 self.opened.push(Open::Through);
             }
             "section" => {
-                if self.section == 0 {
-                    self.flush();
-                }
                 self.section += 1;
                 self.opened.push(Open::Through);
             }
             "title" => {
                 // название главы — здесь же и заголовок в тексте
-                let tag = if self.section <= 1 { "h2" } else { "h3" };
+                let top = self.section == 0 || (self.section == 1 && !self.notes);
+                let tag = if top { "h2" } else { "h3" };
                 self.in_title += 1;
                 self.out.open(tag, "");
                 self.opened.push(Open::Tag(tag));
@@ -443,9 +509,13 @@ impl Fb2 {
             "title" => self.in_title = self.in_title.saturating_sub(1),
             "section" => {
                 self.section = self.section.saturating_sub(1);
-                if self.section == 0 {
+                if self.section == 0 && !self.notes {
                     self.flush();
                 }
+            }
+            "body" => {
+                self.flush();
+                self.notes = false;
             }
             "binary" => {
                 if let Some((id, mime)) = self.bin.take() {
@@ -468,7 +538,14 @@ impl Fb2 {
         if self.skip > 0 {
             return;
         }
-        if self.in_title > 0 && self.section <= 1 {
+        // Название главы: заголовок секции верхнего уровня, а у сносок —
+        // заголовок самого тела («Примечания»).
+        let names = if self.notes {
+            self.section == 0
+        } else {
+            self.section <= 1
+        };
+        if self.in_title > 0 && names {
             let t = s.trim();
             if !t.is_empty() {
                 if !self.title.is_empty() {
@@ -719,6 +796,9 @@ fn xhtml(
 ) -> Result<(String, String, Vec<String>)> {
     let mut reader = quick_xml::Reader::from_reader(bytes);
     reader.config_mut().check_end_names = false;
+    // Кусок mobi, вырезанный по оглавлению, начинается с закрывающих тегов
+    // предыдущей главы; в html из чужих рук такое тоже встречается.
+    reader.config_mut().allow_unmatched_ends = true;
     let mut buf = Vec::new();
     let mut s = Xhtml {
         out: Out::default(),
@@ -951,6 +1031,28 @@ pub(crate) fn single_html(
     let mut chapters = split_headings(html);
     if chapters.len() == 1 && chapters[0].title.is_empty() {
         chapters[0].title = title;
+    }
+    put_images(&mut chapters, |i| srcs.get(i).and_then(|s| image(s)));
+    Ok(chapters)
+}
+
+/// Книга, уже нарезанная на главы снаружи — по оглавлению mobi. Каждый кусок
+/// проходит тот же разбор, что и страница epub; картинки и якоря нумеруются
+/// сквозь всю книгу. Кусок без названия берёт его из своего первого
+/// заголовка, если он есть.
+pub(crate) fn html_pieces(
+    pieces: Vec<(String, String)>,
+    image: &mut dyn FnMut(&str) -> Option<(String, String)>,
+) -> Result<Vec<Chapter>> {
+    let mut anchors = Anchors::default();
+    let mut srcs: Vec<String> = Vec::new();
+    let mut chapters = Vec::new();
+    for (title, text) in pieces {
+        let (html, heading, more) =
+            xhtml(text.as_bytes(), Path::new(""), srcs.len(), &mut anchors)?;
+        srcs.extend(more);
+        let title = if title.is_empty() { heading } else { title };
+        chapters.push(Chapter { title, html });
     }
     put_images(&mut chapters, |i| srcs.get(i).and_then(|s| image(s)));
     Ok(chapters)
@@ -1215,6 +1317,94 @@ mod tests {
         // остаётся внутри своей главы, но с заголовком помельче
         assert_eq!(ch[1].title, "Глава вторая");
         assert!(ch[1].html.contains("<h3>Подглава</h3><p>Мелочь.</p>"));
+    }
+
+    /// Структура живой книги: заголовок тела, две секции без названия
+    /// (вступление и эпиграфы), главы, тело сносок. В оглавлении должны быть
+    /// титул, главы и «Примечания» — а не «Часть 2», «1», «2» и пустые главы
+    /// между сносками.
+    #[test]
+    fn fb2_untitled_sections_and_notes_do_not_become_chapters() {
+        let ch = chapters(
+            "fb2",
+            r##"<FictionBook><description/>
+            <body>
+              <title><p>Автор</p><p>Книга</p></title>
+              <section><subtitle>* * *</subtitle><p>Вступление.</p></section>
+              <section><epigraph><p>Эпиграф.</p></epigraph></section>
+              <section><title><p>Глава первая</p></title><p>Текст<a href="#n1">1</a>.</p></section>
+              <section><title><p>Глава вторая</p></title><p>Ещё.</p></section>
+            </body>
+            <body name="notes">
+              <title><p>Примечания</p></title>
+              <section id="n1"><title><p>1</p></title><p>Первая сноска.</p></section>
+              <section id="n2"><title><p>2</p></title><p>Вторая сноска.</p></section>
+            </body></FictionBook>"##
+                .as_bytes(),
+        )
+        .unwrap();
+
+        let titles: Vec<&str> = ch.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Автор Книга", "Глава первая", "Глава вторая", "Примечания"]
+        );
+        // вступление и эпиграф приклеились к титулу
+        assert!(ch[0].html.contains("Вступление."), "{}", ch[0].html);
+        assert!(ch[0].html.contains("Эпиграф."), "{}", ch[0].html);
+        // сноски — подзаголовками в одной главе, якорь у своей сноски
+        let notes = &ch[3].html;
+        assert!(notes.contains("<h3>1</h3>"), "{notes}");
+        assert!(notes.contains("<h3>2</h3>"), "{notes}");
+        assert!(
+            notes.contains("<span id=\"a0\"></span><h3>1</h3>"),
+            "{notes}"
+        );
+        assert!(
+            ch[1].html.contains("<a href=\"#a0\">1</a>"),
+            "{}",
+            ch[1].html
+        );
+    }
+
+    /// Epub после Calibre: обложка без названия, сноски отдельными файлами
+    /// с пунктами «1», «2» в оглавлении. Обложка уходит в следующую главу,
+    /// сноски — подзаголовками в «Примечания».
+    #[test]
+    fn cover_and_numbered_notes_are_not_chapters() {
+        let ch = |title: &str, html: &str| Chapter {
+            title: title.into(),
+            html: html.into(),
+        };
+        let out = merge_untitled(vec![
+            ch("", "<img>"),
+            ch("Annotation", "<h2>Annotation</h2><p>a</p>"),
+            ch("Глава 1", "<h2>Глава 1</h2><p>b</p>"),
+            ch("Примечания", "<h2>Примечания</h2>"),
+            ch("1", "<h2>1</h2><p>сноска</p>"),
+            ch("2", "<h2>2</h2><p>ещё</p>"),
+        ]);
+        let titles: Vec<&str> = out.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Annotation", "Глава 1", "Примечания"]);
+        assert_eq!(out[0].html, "<img><h2>Annotation</h2><p>a</p>");
+        assert_eq!(
+            out[2].html,
+            "<h2>Примечания</h2><h3>1</h3><p>сноска</p><h3>2</h3><p>ещё</p>"
+        );
+        // роман, где главы названы номерами, не схлопывается
+        let big = "<p>x</p>".repeat(500);
+        let novel = merge_untitled(vec![ch("1", &big), ch("2", &big)]);
+        assert_eq!(novel.len(), 2);
+    }
+
+    /// Книга без единого названия остаётся как есть: нумерация частей —
+    /// её единственное оглавление.
+    #[test]
+    fn untitled_only_book_keeps_its_parts() {
+        let ch =
+            fb2(book("<section><p>Раз.</p></section><section><p>Два.</p></section>").as_bytes())
+                .unwrap();
+        assert_eq!(ch.len(), 2);
     }
 
     /// Разметка уезжает на фронт в innerHTML, поэтому из файла в неё не должно

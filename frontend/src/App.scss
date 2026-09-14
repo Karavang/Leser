@@ -505,10 +505,6 @@ li {
     margin: 0;
     padding: 0;
     list-style: none;
-    counter-reset: ch;
-  }
-  li {
-    counter-increment: ch;
   }
   button {
     width: 100%;
@@ -517,10 +513,6 @@ li {
     background: none;
     text-align: left;
     font-size: 14px;
-    &::before {
-      content: counter(ch) ". ";
-      color: var(--dim);
-    }
     &:hover {
       background: color-mix(in srgb, var(--dim) 20%, transparent);
     }

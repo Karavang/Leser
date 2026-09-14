@@ -7,14 +7,34 @@ import { t } from "../i18n";
 
 const CARDS = ["80%", "60%", "90%", "70%", "85%", "50%"];
 const LEFT = ["60%", "100%", "95%", "88%", "100%", "70%", "92%", "100%", "60%"];
-const RIGHT = ["100%", "85%", "100%", "93%", "78%", "100%", "90%", "66%", "100%"];
+const RIGHT = [
+  "100%",
+  "85%",
+  "100%",
+  "93%",
+  "78%",
+  "100%",
+  "90%",
+  "66%",
+  "100%",
+];
 
-const lines = (widths) => widths.map((w, i) => <i key={i} style={{ width: w }} />);
+const lines = (widths) =>
+  widths.map((w, i) => (
+    <i
+      key={i}
+      style={{ width: w }}
+    />
+  ));
 
 /// Библиотека: та же сетка карточек, что у .bookList, — книги проявятся
 /// на своих местах. Шапка с поиском остаётся живой, её рисует Home.
 export const Loading = () => (
-  <div className="bookList skeleton" role="status" aria-label={t("loading")}>
+  <div
+    className="bookList skeleton"
+    role="status"
+    aria-label={t("loading")}
+  >
     <ul>
       {CARDS.map((w) => (
         <li key={w}>
@@ -53,5 +73,9 @@ export const LoadingBook = ({ theme }) => (
 /// поиск, смена вкладки, возврат на вкладку. Скелет тут был бы лишним:
 /// книги уже на экране, и прятать их ради новых незачем.
 export const BusyLine = () => (
-  <div className="busyLine top" role="progressbar" aria-label={t("loading")} />
+  <div
+    className="busyLine top"
+    role="progressbar"
+    aria-label={t("loading")}
+  />
 );
