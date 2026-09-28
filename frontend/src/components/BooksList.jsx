@@ -18,12 +18,12 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
   const remove = async (book) => {
     if (!confirm(t("confirmDeleteBook", book.title))) return;
     try {
-      await axios.delete(`/api/deleteOne/${book.filename}`, {
+      await axios.delete(`/api/deleteOne/${book.id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setError(null);
       setDetails(null);
-      onDeleted(book.filename);
+      onDeleted(book.id);
     } catch (e) {
       setError(e.response?.data?.message ?? t("deleteBookFailed"));
     }
@@ -37,11 +37,11 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
     try {
       await axios({
         method: mine ? "post" : "delete",
-        url: `/api/myBooks/${book.filename}`,
+        url: `/api/myBooks/${book.id}`,
         headers: { Authorization: `Bearer ${token}` },
       });
       setError(null);
-      onShelf(book.filename, mine);
+      onShelf(book.id, mine);
       // подробности открыты по этой же книге — отметку в них тоже поправить
       setDetails((d) => (d && d.id === book.id ? { ...d, mine } : d));
     } catch (e) {
@@ -59,7 +59,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
               key={book.id}
               onMouseEnter={() => setEnter(book.id)}
               onMouseLeave={() => setEnter(null)}
-              onClick={() => navigate(`/book/${book.filename}`)}
+              onClick={() => navigate(`/book/${book.id}`)}
             >
               {/* Карточка — название и автор, дальше подробности. Даты тут
                   не место: в метаданных она произвольной формы и въезжала

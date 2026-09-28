@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { clearSession } from "../session";
 import LogoutButton from "./LogoutButton";
-import { lang, setLang, t } from "../i18n";
+import { LANGS, lang, setLang, t } from "../i18n";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
 /// Сколько дней показывает график. Месяц — это ещё видно на телефоне
@@ -163,7 +163,7 @@ const UserPage = () => {
           {books.map((book) => (
             <li
               key={book.id}
-              onClick={() => navigate(`/book/${book.filename}`)}
+              onClick={() => navigate(`/book/${book.id}`)}
             >
               <h4>{book.title}</h4>
               <p>{book.author}</p>
@@ -182,12 +182,12 @@ const UserPage = () => {
               <p
                 // Книги может уже не быть в библиотеке — цитата остаётся,
                 // но открывать её тогда негде.
-                className={q.filename ? "goto" : ""}
+                className={q.book ? "goto" : ""}
                 onClick={() =>
-                  q.filename &&
-                  navigate(`/book/${q.filename}?at=${q.position}`)
+                  q.book &&
+                  navigate(`/book/${q.book}?at=${q.position}`)
                 }
-                title={q.filename ? t("openAtQuote") : undefined}
+                title={q.book ? t("openAtQuote") : undefined}
               >
                 {q.text}
               </p>
@@ -277,8 +277,11 @@ const UserPage = () => {
               value={lang}
               onChange={(e) => setLang(e.target.value)}
             >
-              <option value="ru">Русский</option>
-              <option value="en">English</option>
+              {LANGS.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
             </select>
           </div>
 

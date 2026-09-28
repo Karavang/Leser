@@ -330,6 +330,10 @@ li {
     font-style: italic;
     color: var(--dim);
   }
+  // выключенные иллюстрации: display: block выше перебил бы [hidden]
+  img[hidden] {
+    display: none;
+  }
   img {
     display: block;
     max-width: 100%;
@@ -488,6 +492,36 @@ li {
   color: var(--dim);
   &:hover:not(:disabled) {
     color: var(--ink);
+  }
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  .reader {
+    --pad: 16px;
+  }
+  .flip {
+    display: none;
+  }
+  .readerBar,
+  .readerFoot {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    background: var(--paper);
+    transition: transform 0.2s;
+  }
+  .readerBar {
+    top: 0;
+  }
+  .readerFoot {
+    bottom: 0;
+  }
+  .reader.bare .readerBar {
+    transform: translateY(-100%);
+  }
+  .reader.bare .readerFoot {
+    transform: translateY(100%);
   }
 }
 

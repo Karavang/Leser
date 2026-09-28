@@ -77,6 +77,36 @@ fn issue_token(secret: &str, id: Uuid, admin: bool) -> Result<String> {
     )?)
 }
 
+// ponytail: the token rides in the image URL because <img> carries no headers.
+// It is scoped to one book and dies in a day; a signed cookie is the upgrade
+// if URLs start leaking into logs that matter.
+pub fn book_token(secret: &str, book: Uuid) -> Result<String> {
+    let exp = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64)
+        + 86_400;
+    Ok(encode(
+        &Header::default(),
+        &Claims {
+            sub: book,
+            admin: false,
+            exp,
+        },
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )?)
+}
+
+pub fn book_of_token(secret: &str, token: &str) -> Option<Uuid> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .ok()
+    .map(|t| t.claims.sub)
+}
+
 fn valid_email(e: &str) -> bool {
     let mut parts = e.split('@');
     match (parts.next(), parts.next(), parts.next()) {

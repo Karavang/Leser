@@ -21,11 +21,22 @@ import { applyTheme, theme as saved, THEMES } from "../theme";
 
 const FONTS = [16, 18, 20, 22, 25, 28, 32];
 
+const TOUCH = matchMedia("(pointer: coarse), (max-width: 720px)").matches;
+
+const nativeFont = () => {
+  const probe = document.createElement("p");
+  probe.style.font = "-apple-system-body";
+  document.body.append(probe);
+  const px = Number.parseFloat(getComputedStyle(probe).fontSize) || 16;
+  probe.remove();
+  return FONTS.reduce((a, b) => (Math.abs(b - px) < Math.abs(a - px) ? b : a));
+};
+
 /// Где читатель остановился — доля книги, а не номер страницы: страницы
 /// разные при разном шрифте и размере окна, доля одна и та же.
-const savedSpot = (filename) => {
+const savedSpot = (id) => {
   const user = JSON.parse(localStorage.getItem("user")) || {};
-  const spot = (user.pages || []).find((p) => p.filename === filename);
+  const spot = (user.pages || []).find((p) => p.id === id);
   const frac = Number.parseFloat(spot?.page);
   // старые закладки — epubcfi от прежней читалки, числом не притворяются
   return Number.isFinite(frac) && frac >= 0 && frac < 1 ? frac : 0;
@@ -40,16 +51,16 @@ const ONE_WORD = /^[\p{L}\p{M}'’-]+$/u;
 /// бесполезна, а весь абзац в неё не влезет.
 const CONTEXT = 120;
 
-const rememberSpot = (filename, frac) => {
+const rememberSpot = (id, frac) => {
   const user = JSON.parse(localStorage.getItem("user"));
   if (!user) return;
-  user.pages = (user.pages || []).filter((p) => p.filename !== filename);
-  user.pages.push({ filename, page: String(frac) });
+  user.pages = (user.pages || []).filter((p) => p.id !== id);
+  user.pages.push({ id, page: String(frac) });
   localStorage.setItem("user", JSON.stringify(user));
 };
 
 export const Reader = () => {
-  const { filename } = useParams();
+  const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const token = JSON.parse(localStorage.getItem("token"));
@@ -63,7 +74,7 @@ export const Reader = () => {
   );
   const fromQuote = Number.isFinite(openAt) && openAt >= 0 && openAt < 1;
   /// доля книги, на которую надо встать после пересчёта страниц
-  const spot = useRef(fromQuote ? openAt : savedSpot(filename));
+  const spot = useRef(fromQuote ? openAt : savedSpot(id));
   /// первая страница каждой главы — для оглавления и подписи в шапке
   const starts = useRef([]);
   const touch = useRef(0);
@@ -86,9 +97,19 @@ export const Reader = () => {
   /// короткий ответ на «сохранил» — гаснет сам
   const [said, setSaid] = useState(null);
   const [font, setFont] = useState(
-    () => Number(localStorage.getItem("readerFont")) || 20,
+    () =>
+      Number(localStorage.getItem("readerFont")) || (TOUCH ? nativeFont() : 20),
   );
   const [theme, setTheme] = useState(saved);
+  const [bars, setBars] = useState(false);
+  /// иллюстрации: у книги-альбома они и есть книга, в дороге — лишние
+  /// мегабайты. Выбор помнится на устройстве, как шрифт и тема.
+  const [pics, setPics] = useState(
+    () => localStorage.getItem("readerPics") !== "off",
+  );
+  /// картинки иллюстрированной книги лежат отдельно и едут по одной:
+  /// заголовков у <img> нет, поэтому доступ даёт короткий токен в адресе
+  const [imgToken, setImgToken] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +118,7 @@ export const Reader = () => {
     // запасным вариантом — на случай, если сервер не ответит.
     const where = fromQuote
       ? Promise.resolve(null)
-      : axios.get(`/api/progress/${filename}`, auth).catch(() => null);
+      : axios.get(`/api/progress/${id}`, auth).catch(() => null);
 
     // no-cache в запросе — «сверь с сервером»: у кого книга лежала в кэше
     // с прежним годовым immutable, тот иначе новый разбор не увидит никогда.
@@ -105,12 +126,18 @@ export const Reader = () => {
     const fresh = {
       headers: { ...auth.headers, "Cache-Control": "no-cache" },
     };
-    Promise.all([axios.get(`/api/read/${filename}`, fresh), where])
+    Promise.all([axios.get(`/api/read/${id}`, fresh), where])
       .then(([read, progress]) => {
         if (!alive) return;
         const at = Number.parseFloat(progress?.data?.page);
         if (Number.isFinite(at) && at >= 0 && at < 1) spot.current = at;
         setBook(read.data);
+        if (read.data.chapters?.some((c) => c.html.includes('src="img/'))) {
+          axios
+            .get(`/api/imgToken/${id}`, auth)
+            .then((r) => alive && setImgToken(r.data.token))
+            .catch(() => {});
+        }
       })
       .catch(
         (e) =>
@@ -122,15 +149,20 @@ export const Reader = () => {
     };
     // token лежит в localStorage и меняется только вместе с сессией
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filename]);
+  }, [id]);
 
   // Вся книга одной строкой: колонки должны быть сквозными, иначе главу
   // не перелистнёшь в следующую, а оглавление станет набором отдельных полос.
-  const html = useMemo(
-    () =>
-      (book?.chapters || []).map((c) => `<section>${c.html}</section>`).join(""),
-    [book],
-  );
+  const html = useMemo(() => {
+    const body = (book?.chapters || [])
+      .map((c) => `<section>${c.html}</section>`)
+      .join("");
+    // Картинки иллюстрированной книги сервер оставил ссылками `img/N`:
+    // без токена их не забрать, а выключенными они не нужны вовсе.
+    return body.replace(/src="img\/(\d+)"/g, (whole, n) =>
+      pics && imgToken ? `src="/api/img/${id}/${n}?t=${imgToken}"` : "hidden",
+    );
+  }, [book, pics, imgToken, id]);
 
   /// Номер страницы, на которую попал элемент. Округлять нельзя, только
   /// вниз: на широком экране страница — это разворот из двух колонок, и то,
@@ -217,7 +249,17 @@ export const Reader = () => {
   /// и возвращаются в текст.
   const follow = (e) => {
     const link = e.target.closest('a[href^="#"]');
-    if (!link) return;
+    if (!link) {
+      if (String(window.getSelection()).trim()) return;
+      if (!TOUCH || bars) return setBars(!bars);
+      // ponytail: Kindle zones — top 15% menu, left 30% back, rest forward; hardcoded ratios, make them settings if readers ask
+      const box = view.current.getBoundingClientRect();
+      const x = (e.clientX - box.left) / box.width;
+      const y = (e.clientY - box.top) / box.height;
+      if (y < 0.15) setBars(true);
+      else go(page + (x < 0.3 ? -1 : 1));
+      return;
+    }
     e.preventDefault();
     const target = view.current?.querySelector(
       `[id="${CSS.escape(link.getAttribute("href").slice(1))}"]`,
@@ -292,19 +334,19 @@ export const Reader = () => {
     // Перебивать закладку, на которой человек остановился, за такое нельзя.
     if (fromQuote && !moved.current) return;
     const frac = page / total;
-    rememberSpot(filename, frac);
-    const id = setTimeout(() => {
+    rememberSpot(id, frac);
+    const timer = setTimeout(() => {
       axios
         .post(
           "/api/pageWasFlipped",
-          { filename, page: String(frac) },
+          { book: id, page: String(frac) },
           { headers: { Authorization: `Bearer ${token}` } },
         )
         .catch(() => {});
     }, 800);
-    return () => clearTimeout(id);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, total, book, filename]);
+  }, [page, total, book, id]);
 
   /// Что выделили. Выделение уже сделал браузер — нам остаётся забрать текст
   /// и фразу вокруг него: сохранять слово без примера бессмысленно.
@@ -333,7 +375,7 @@ export const Reader = () => {
   /// Цитата и слово отличаются только адресом и телом запроса — отправка одна.
   const keep = (url, body, ok) => {
     axios
-      .post(url, { filename, ...body }, auth)
+      .post(url, { book: id, ...body }, auth)
       .then(() => {
         setSaid(ok);
         setSel(null);
@@ -373,7 +415,7 @@ export const Reader = () => {
   const percent = total > 1 ? Math.round((page / (total - 1)) * 100) : 100;
 
   return (
-    <div className={`reader ${theme}`}>
+    <div className={`reader ${theme} ${bars ? "" : "bare"}`}>
       <header className="readerBar">
         <button
           className="flat"
@@ -414,6 +456,19 @@ export const Reader = () => {
               onClick={() => paint(name)}
             />
           ))}
+          {book.chapters?.some((c) => c.html.includes('src="img/')) && (
+            <button
+              className={`flat ${pics ? "active" : ""}`}
+              title={t(pics ? "picsOff" : "picsOn")}
+              aria-pressed={pics}
+              onClick={() => {
+                localStorage.setItem("readerPics", pics ? "off" : "on");
+                setPics(!pics);
+              }}
+            >
+              ▦
+            </button>
+          )}
           <button
             className={`flat ${toc ? "active" : ""}`}
             title={t("contents")}
@@ -441,8 +496,8 @@ export const Reader = () => {
           onTouchStart={(e) => (touch.current = e.changedTouches[0].clientX)}
           onTouchEnd={(e) => {
             const moved = e.changedTouches[0].clientX - touch.current;
-            if (Math.abs(moved) > 40) go(page + (moved < 0 ? 1 : -1));
-            else grab();
+            if (Math.abs(moved) > 40) return go(page + (moved < 0 ? 1 : -1));
+            grab();
           }}
         >
           {/* Разметку собирает сервер: теги только из его таблицы, весь текст

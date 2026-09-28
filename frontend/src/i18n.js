@@ -1,6 +1,7 @@
-/// Перевод интерфейса. Словарь и три функции вместо библиотеки: языка два,
-/// строк полторы сотни, склонений и множественного числа в них нет.
-/// Понадобится третий язык или числа вида «5 книг» — тогда i18next.
+/// Перевод интерфейса. Словари и три функции вместо библиотеки: языков пять,
+/// строк сотня, склонений и чисел вида «5 книг» в них нет — только подписи.
+/// Понадобится множественное число (а в польском и украинском их три формы) —
+/// тогда i18next с Intl.PluralRules, а не свой велосипед.
 ///
 /// Ключи — короткие имена, значения со вставками — функции.
 
@@ -99,6 +100,9 @@ export const RU = {
   fontSmaller: "Меньше шрифт",
   fontBigger: "Больше шрифт",
   contents: "Оглавление",
+  parsing: "Разбираем книгу…",
+  picsOn: "Показать иллюстрации",
+  picsOff: "Скрыть иллюстрации",
   prevPage: "Назад",
   nextPage: "Дальше",
   part: (n) => `Часть ${n}`,
@@ -210,6 +214,9 @@ export const EN = {
   fontSmaller: "Smaller text",
   fontBigger: "Larger text",
   contents: "Contents",
+  parsing: "Parsing the book…",
+  picsOn: "Show illustrations",
+  picsOff: "Hide illustrations",
   prevPage: "Back",
   nextPage: "Next",
   part: (n) => `Part ${n}`,
@@ -234,11 +241,362 @@ export const EN = {
   serverSilent: "The server is not responding",
 };
 
-/// Выбранный язык, иначе язык браузера. Русский — только если браузер русский,
-/// всё остальное, включая незаданный язык, читает интерфейс по-английски.
+export const UK = {
+  toLibrary: "До бібліотеки",
+  close: "Закрити",
+  loading: "Завантаження",
+  loadingBook: "Відкриваю книжку",
+  profile: "Профіль",
+
+  tabLibrary: "Бібліотека",
+  tabMine: "Мої книжки",
+  searchPlaceholder: "Назва, автор або серія",
+  noBooks: "Книжок поки немає",
+  more: "Докладніше",
+  shelfAdd: "До моїх книжок",
+  shelfRemove: "Прибрати з моїх книжок",
+  shelfRemoveShort: "Прибрати з моїх",
+  deleteBook: "Видалити книжку",
+  confirmDeleteBook: (title) => `Видалити «${title}»? Скасувати не можна.`,
+  deleteBookFailed: "Не вдалося видалити книжку",
+  shelfFailed: "Не вдалося змінити «мої книжки»",
+
+  series: "Серія",
+  published: "Видано",
+  language: "Мова",
+  source: "Джерело",
+  addedAt: "Додано",
+
+  otherSources: "Інші джерела",
+  importing: "Забираємо…",
+  importBook: "До бібліотеки",
+  importFailed: "Не вдалося додати книжку",
+
+  addBooks: "Додати книжки",
+  dropHere: "Перетягніть книжки сюди",
+  orPick: "або натисніть, щоб вибрати на диску",
+  eachUpTo: (mb) => `до ${mb} МБ кожна`,
+  queued: "у черзі",
+  uploaded: "готово",
+  badFormat: "формат не читається",
+  tooBig: (mb) => `більше ${mb} МБ`,
+  uploadFailed: "не вдалося завантажити",
+  parsing: "Розбираємо книжку…",
+
+  booksInRead: "Читаю зараз",
+  noBooksInRead: "Жодної книжки ще не відкрито",
+  loadFailed: "Не вдалося завантажити",
+  deleteFailed: "Не вдалося видалити",
+
+  daysInRow: "днів поспіль",
+  pagesMonth: "сторінок за місяць",
+  statReading: "читаю",
+  statFinished: "прочитано",
+
+  quotes: "Цитати",
+  noQuotes: "Виділіть текст у книжці — він збережеться сюди",
+  openAtQuote: "Відкрити книжку на цьому місці",
+  saveQuote: "До цитат",
+  quoteSaved: "Цитату збережено",
+  dictionary: "Словник",
+  noWords: "Виділіть слово у книжці — воно збережеться сюди",
+  saveWord: "До словника",
+  wordSaved: "Слово у словнику",
+  ankiExport: "Картки для Anki",
+  saveFailed: "Не вдалося зберегти",
+
+  exportAll: "Забрати все своє",
+  exportHint: "закладки, полиця, цитати та словник одним файлом",
+  exportDo: "Вивантажити",
+  exportFailed: "Не вдалося вивантажити",
+
+  settings: "Налаштування",
+  logout: "Вийти з акаунта",
+  logoutHint: "на цьому пристрої, книжки та закладки залишаться",
+  deleteAccount: "Видалити акаунт",
+  deleteAccountHint: "закладки зникнуть, завантажені книжки залишаться в бібліотеці",
+  delete: "Видалити",
+  confirmDeleteAccount: "Видалити акаунт? Закладки зникнуть, скасувати не можна.",
+  deleteAccountFailed: "Не вдалося видалити акаунт",
+  interfaceLanguage: "Мова інтерфейсу",
+  languageHint: "за замовчуванням — мова браузера",
+  theme: "Тема",
+  themeHint: "спільна для застосунку та читалки",
+
+  openFailed: "Не вдалося відкрити книжку",
+  fontSmaller: "Менший шрифт",
+  fontBigger: "Більший шрифт",
+  contents: "Зміст",
+  picsOn: "Показати ілюстрації",
+  picsOff: "Сховати ілюстрації",
+  prevPage: "Назад",
+  nextPage: "Далі",
+  part: (n) => `Частина ${n}`,
+  backToPage: (n) => `← назад до сторінки ${n}`,
+  position: "Місце в книжці",
+  themeDay: "День",
+  themeSepia: "Сепія",
+  themeNight: "Ніч",
+
+  signIn: "Вхід",
+  signUp: "Реєстрація",
+  username: "Ім’я",
+  email: "Пошта",
+  emailHint: "Введіть пошту",
+  password: "Пароль",
+  passwordHint: "Придумайте пароль, щонайменше 8 символів",
+  noAccount: "Ще немає акаунта?",
+  goRegister: "Зареєструватися",
+  haveAccount: "Вже є акаунт?",
+  goLogin: "Увійти",
+  loginFailed: "Не вдалося увійти",
+  serverSilent: "Сервер не відповідає",
+};
+
+export const PL = {
+  toLibrary: "Do biblioteki",
+  close: "Zamknij",
+  loading: "Wczytywanie",
+  loadingBook: "Otwieram książkę",
+  profile: "Profil",
+
+  tabLibrary: "Biblioteka",
+  tabMine: "Moje książki",
+  searchPlaceholder: "Tytuł, autor lub cykl",
+  noBooks: "Nie ma jeszcze książek",
+  more: "Szczegóły",
+  shelfAdd: "Do moich książek",
+  shelfRemove: "Usuń z moich książek",
+  shelfRemoveShort: "Usuń z moich",
+  deleteBook: "Usuń książkę",
+  confirmDeleteBook: (title) => `Usunąć „${title}”? Tego nie można cofnąć.`,
+  deleteBookFailed: "Nie udało się usunąć książki",
+  shelfFailed: "Nie udało się zmienić „moich książek”",
+
+  series: "Cykl",
+  published: "Wydana",
+  language: "Język",
+  source: "Źródło",
+  addedAt: "Dodana",
+
+  otherSources: "Inne źródła",
+  importing: "Pobieramy…",
+  importBook: "Do biblioteki",
+  importFailed: "Nie udało się dodać książki",
+
+  addBooks: "Dodaj książki",
+  dropHere: "Przeciągnij książki tutaj",
+  orPick: "albo kliknij, aby wybrać je na dysku",
+  eachUpTo: (mb) => `do ${mb} MB każda`,
+  queued: "w kolejce",
+  uploaded: "gotowe",
+  badFormat: "format nieobsługiwany",
+  tooBig: (mb) => `ponad ${mb} MB`,
+  uploadFailed: "nie udało się wysłać",
+  parsing: "Przetwarzamy książkę…",
+
+  booksInRead: "Teraz czytam",
+  noBooksInRead: "Żadna książka nie została jeszcze otwarta",
+  loadFailed: "Nie udało się wczytać",
+  deleteFailed: "Nie udało się usunąć",
+
+  daysInRow: "dni z rzędu",
+  pagesMonth: "stron w tym miesiącu",
+  statReading: "czytam",
+  statFinished: "przeczytane",
+
+  quotes: "Cytaty",
+  noQuotes: "Zaznacz tekst w książce — trafi tutaj",
+  openAtQuote: "Otwórz książkę w tym miejscu",
+  saveQuote: "Do cytatów",
+  quoteSaved: "Cytat zapisany",
+  dictionary: "Słownik",
+  noWords: "Zaznacz słowo w książce — trafi tutaj",
+  saveWord: "Do słownika",
+  wordSaved: "Słowo w słowniku",
+  ankiExport: "Fiszki do Anki",
+  saveFailed: "Nie udało się zapisać",
+
+  exportAll: "Zabierz wszystko swoje",
+  exportHint: "zakładki, półka, cytaty i słownik w jednym pliku",
+  exportDo: "Eksportuj",
+  exportFailed: "Nie udało się wyeksportować",
+
+  settings: "Ustawienia",
+  logout: "Wyloguj się",
+  logoutHint: "na tym urządzeniu; książki i zakładki zostają",
+  deleteAccount: "Usuń konto",
+  deleteAccountHint: "zakładki przepadną, wgrane książki zostaną w bibliotece",
+  delete: "Usuń",
+  confirmDeleteAccount: "Usunąć konto? Zakładki przepadną, tego nie można cofnąć.",
+  deleteAccountFailed: "Nie udało się usunąć konta",
+  interfaceLanguage: "Język interfejsu",
+  languageHint: "domyślnie język przeglądarki",
+  theme: "Motyw",
+  themeHint: "wspólny dla aplikacji i czytnika",
+
+  openFailed: "Nie udało się otworzyć książki",
+  fontSmaller: "Mniejsza czcionka",
+  fontBigger: "Większa czcionka",
+  contents: "Spis treści",
+  picsOn: "Pokaż ilustracje",
+  picsOff: "Ukryj ilustracje",
+  prevPage: "Wstecz",
+  nextPage: "Dalej",
+  part: (n) => `Część ${n}`,
+  backToPage: (n) => `← wróć do strony ${n}`,
+  position: "Miejsce w książce",
+  themeDay: "Dzień",
+  themeSepia: "Sepia",
+  themeNight: "Noc",
+
+  signIn: "Logowanie",
+  signUp: "Rejestracja",
+  username: "Imię",
+  email: "E-mail",
+  emailHint: "Podaj e-mail",
+  password: "Hasło",
+  passwordHint: "Wymyśl hasło, minimum 8 znaków",
+  noAccount: "Nie masz jeszcze konta?",
+  goRegister: "Zarejestruj się",
+  haveAccount: "Masz już konto?",
+  goLogin: "Zaloguj się",
+  loginFailed: "Nie udało się zalogować",
+  serverSilent: "Serwer nie odpowiada",
+};
+
+export const DE = {
+  toLibrary: "Zur Bibliothek",
+  close: "Schließen",
+  loading: "Wird geladen",
+  loadingBook: "Buch wird geöffnet",
+  profile: "Profil",
+
+  tabLibrary: "Bibliothek",
+  tabMine: "Meine Bücher",
+  searchPlaceholder: "Titel, Autor oder Reihe",
+  noBooks: "Noch keine Bücher",
+  more: "Details",
+  shelfAdd: "Zu meinen Büchern",
+  shelfRemove: "Aus meinen Büchern entfernen",
+  shelfRemoveShort: "Aus meinen entfernen",
+  deleteBook: "Buch löschen",
+  confirmDeleteBook: (title) => `„${title}“ löschen? Das lässt sich nicht rückgängig machen.`,
+  deleteBookFailed: "Buch konnte nicht gelöscht werden",
+  shelfFailed: "„Meine Bücher“ konnten nicht geändert werden",
+
+  series: "Reihe",
+  published: "Erschienen",
+  language: "Sprache",
+  source: "Quelle",
+  addedAt: "Hinzugefügt",
+
+  otherSources: "Andere Quellen",
+  importing: "Wird geholt…",
+  importBook: "In die Bibliothek",
+  importFailed: "Buch konnte nicht hinzugefügt werden",
+
+  addBooks: "Bücher hinzufügen",
+  dropHere: "Bücher hierher ziehen",
+  orPick: "oder klicken, um sie auf der Festplatte zu wählen",
+  eachUpTo: (mb) => `bis ${mb} MB pro Datei`,
+  queued: "in der Warteschlange",
+  uploaded: "fertig",
+  badFormat: "Format nicht lesbar",
+  tooBig: (mb) => `über ${mb} MB`,
+  uploadFailed: "Upload fehlgeschlagen",
+  parsing: "Buch wird verarbeitet…",
+
+  booksInRead: "Ich lese gerade",
+  noBooksInRead: "Noch kein Buch geöffnet",
+  loadFailed: "Konnte nicht geladen werden",
+  deleteFailed: "Konnte nicht gelöscht werden",
+
+  daysInRow: "Tage in Folge",
+  pagesMonth: "Seiten diesen Monat",
+  statReading: "lese ich",
+  statFinished: "gelesen",
+
+  quotes: "Zitate",
+  noQuotes: "Text im Buch markieren — er landet hier",
+  openAtQuote: "Buch an dieser Stelle öffnen",
+  saveQuote: "Als Zitat speichern",
+  quoteSaved: "Zitat gespeichert",
+  dictionary: "Wörterbuch",
+  noWords: "Wort im Buch markieren — es landet hier",
+  saveWord: "Ins Wörterbuch",
+  wordSaved: "Wort im Wörterbuch",
+  ankiExport: "Karten für Anki",
+  saveFailed: "Konnte nicht gespeichert werden",
+
+  exportAll: "Alles Eigene mitnehmen",
+  exportHint: "Lesezeichen, Regal, Zitate und Wörterbuch in einer Datei",
+  exportDo: "Exportieren",
+  exportFailed: "Export fehlgeschlagen",
+
+  settings: "Einstellungen",
+  logout: "Abmelden",
+  logoutHint: "auf diesem Gerät; Bücher und Lesezeichen bleiben",
+  deleteAccount: "Konto löschen",
+  deleteAccountHint: "Lesezeichen gehen verloren, hochgeladene Bücher bleiben in der Bibliothek",
+  delete: "Löschen",
+  confirmDeleteAccount: "Konto löschen? Lesezeichen gehen verloren, das lässt sich nicht rückgängig machen.",
+  deleteAccountFailed: "Konto konnte nicht gelöscht werden",
+  interfaceLanguage: "Sprache der Oberfläche",
+  languageHint: "Standard ist die Browsersprache",
+  theme: "Design",
+  themeHint: "gilt für App und Leseansicht",
+
+  openFailed: "Buch konnte nicht geöffnet werden",
+  fontSmaller: "Kleinere Schrift",
+  fontBigger: "Größere Schrift",
+  contents: "Inhalt",
+  picsOn: "Illustrationen zeigen",
+  picsOff: "Illustrationen ausblenden",
+  prevPage: "Zurück",
+  nextPage: "Weiter",
+  part: (n) => `Teil ${n}`,
+  backToPage: (n) => `← zurück zu Seite ${n}`,
+  position: "Position im Buch",
+  themeDay: "Tag",
+  themeSepia: "Sepia",
+  themeNight: "Nacht",
+
+  signIn: "Anmelden",
+  signUp: "Registrieren",
+  username: "Name",
+  email: "E-Mail",
+  emailHint: "E-Mail eingeben",
+  password: "Passwort",
+  passwordHint: "Passwort ausdenken, mindestens 8 Zeichen",
+  noAccount: "Noch kein Konto?",
+  goRegister: "Registrieren",
+  haveAccount: "Schon ein Konto?",
+  goLogin: "Anmelden",
+  loginFailed: "Anmeldung fehlgeschlagen",
+  serverSilent: "Der Server antwortet nicht",
+};
+
+/// Языки интерфейса: код, как он пишется в `lang`, и название на себе самом —
+/// «Deutsch» в списке понятнее, чем «Немецкий», кто бы его ни читал.
+export const LANGS = [
+  ["ru", "Русский"],
+  ["uk", "Українська"],
+  ["pl", "Polski"],
+  ["en", "English"],
+  ["de", "Deutsch"],
+];
+
+const DICTS = { ru: RU, uk: UK, pl: PL, en: EN, de: DE };
+
+/// Выбранный язык, иначе язык браузера, иначе английский. `ru-RU` и `de-AT` —
+/// это `ru` и `de`: регион нам безразличен, словарь один на язык.
 export const pick = (saved, browser) => {
-  if (saved === "ru" || saved === "en") return saved;
-  return String(browser || "").toLowerCase().startsWith("ru") ? "ru" : "en";
+  if (DICTS[saved]) return saved;
+  const base = String(browser || "")
+    .toLowerCase()
+    .split(/[-_]/)[0];
+  return DICTS[base] ? base : "en";
 };
 
 export const lang = pick(
@@ -246,12 +604,13 @@ export const lang = pick(
   globalThis.navigator?.language,
 );
 
-const dict = lang === "ru" ? RU : EN;
+const dict = DICTS[lang] ?? EN;
 
-/// Строка по ключу. Незнакомый ключ возвращается как есть — на экране это
-/// видно сразу, а падать из-за подписи к кнопке приложение не должно.
+/// Строка по ключу. Нет перевода — берём английский, нет и его — сам ключ:
+/// на экране это видно сразу, а падать из-за подписи к кнопке приложение
+/// не должно.
 export const t = (key, ...args) => {
-  const value = dict[key] ?? key;
+  const value = dict[key] ?? EN[key] ?? key;
   return typeof value === "function" ? value(...args) : value;
 };
 

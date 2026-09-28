@@ -25,13 +25,16 @@ const ACCEPT = BOOK_TYPES.map((t) => `.${t}`).join(",");
 /// В подписи только основные имена: `htm` рядом с `html` читателю ничего
 /// не говорит, а строка из-за них переносится на три.
 const SHOWN = ["epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html"];
-const MAX_MB = 64;
+const MAX_MB = 256;
 
 /// Что показать про файл в списке. Ошибку присылает бэк — она конкретнее
 /// любой нашей: битый файл, DRM, не тот формат внутри.
 const STATE = {
   wait: () => t("queued"),
-  send: (item) => `${item.percent}%`,
+  // На 100% файл только доехал: дальше сервер разбирает книгу, а у скана
+  // на сотню мегабайт это минуты. Проценты, застывшие на сотне, читаются
+  // как «всё повисло».
+  send: (item) => (item.percent >= 100 ? t("parsing") : `${item.percent}%`),
   done: () => t("uploaded"),
   fail: (item) => item.message,
 };
@@ -91,10 +94,13 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
       // книга уже в базе — список обновляем сразу, а не к перезагрузке
       onAdded?.();
     } catch (error) {
+      // Сообщение присылает бэк; но 502 от nginx или обрыв связи приходят
+      // без него — тогда хотя бы код, иначе причину не отличить от причины.
+      const said = error.response?.data?.message;
+      const code = error.response?.status;
       patch(item.id, {
         state: "fail",
-        // при сетевой ошибке response нет вовсе — без ?. тут падало
-        message: error.response?.data?.message ?? t("uploadFailed"),
+        message: said ?? (code ? `${t("uploadFailed")} (${code})` : t("uploadFailed")),
       });
     }
   };

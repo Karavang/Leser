@@ -12,6 +12,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 mod auth;
 mod books;
+mod images;
 mod me;
 mod mobi;
 mod parse;
@@ -19,9 +20,10 @@ mod rda;
 mod reader;
 mod search;
 mod sources;
+mod tts;
 
 /// Потолок на размер книги. epub/fb2 в этом умещаются с большим запасом.
-const MAX_UPLOAD: usize = 64 * 1024 * 1024;
+const MAX_UPLOAD: usize = 256 * 1024 * 1024;
 
 pub struct AppState {
     pub db: sqlx::PgPool,
@@ -209,6 +211,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/getAll", get(books::get_all))
         .route("/downloadOne/{filename}", get(books::download_one))
         .route("/read/{filename}", get(books::read_one))
+        .route("/imgToken/{filename}", get(images::token_for))
+        .route("/img/{id}/{idx}", get(images::one))
         .route("/deleteOne/{filename}", delete(books::delete_one))
         // Большой лимит только на загрузку книги: JSON-эндпоинты остаются
         // с дефолтными 2 МБ, чтобы их нельзя было завалить телом на 64 МБ.

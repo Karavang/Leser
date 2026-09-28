@@ -33,11 +33,10 @@ pub struct Chapter {
 /// «Война и мир» в этой разметке — около 3 МБ.
 const HTML_BUDGET: usize = 12 * 1024 * 1024;
 
-/// ponytail: картинки едут data-URI в том же ответе. Отдельная выдача картинки
-/// потребовала бы токена прямо в `<img src>`, а его туда не положишь. Потолок
-/// держит ответ в разумном размере, лишние картинки просто не поедут.
-/// Понадобятся альбомы — эндпоинт с одноразовой ссылкой на картинку.
-const IMAGE_BUDGET: usize = 4 * 1024 * 1024;
+// ponytail: small images still ride inline as data URIs. An illustrated book's
+// images are pulled back out of the parsed document into book_images and served
+// one by one — see images.rs. The ceiling is on already-shrunk bytes.
+const IMAGE_BUDGET: usize = 48 * 1024 * 1024;
 
 const MAX_CHAPTERS: usize = 5000;
 
@@ -262,6 +261,7 @@ fn put_images(chapters: &mut [Chapter], mut found: impl FnMut(usize) -> Option<(
                 .parse::<usize>()
                 .ok()
                 .and_then(&mut found)
+                .map(|(mime, b64)| crate::images::smaller(mime, b64))
                 .filter(|(_, b64)| used + b64.len() <= IMAGE_BUDGET);
             if let Some((mime, b64)) = img {
                 used += b64.len();
@@ -289,6 +289,8 @@ pub fn chapters(ext: &str, bytes: &[u8]) -> Result<Vec<Chapter>> {
     }?;
     chapters.truncate(MAX_CHAPTERS);
     // Пустая глава — это не глава: в оглавлении она строка, ведущая никуда.
+    chapters.retain(|c| !c.html.trim().is_empty());
+    drop_ocr_noise(&mut chapters);
     chapters.retain(|c| !c.html.trim().is_empty());
     let chapters = merge_untitled(chapters);
     if chapters.is_empty() {
@@ -988,6 +990,132 @@ pub fn decode(bytes: &[u8], hint: Option<&'static encoding_rs::Encoding>) -> Str
 /// ponytail: кириллица против латиницы, больше ничего. В txt, pdf и html
 /// языку взяться неоткуда, а эти два и покрывают библиотеку; не сошлось —
 /// возвращаем `None`, и переносов просто не будет, как и сейчас.
+const CYRILLIC: [&str; 7] = ["ru", "uk", "be", "bg", "sr", "mk", "kk"];
+
+// ponytail: script mismatch only — a scan from archive.org says `ur` over
+// English text. Latin against latin is left alone: `de` on English text is
+// undetectable this way, and German hyphenation beats our guess.
+pub fn wrong_script(meta: Option<&str>, guess: Option<&str>) -> bool {
+    let Some(meta) = meta else { return false };
+    let base = meta.split(['-', '_']).next().unwrap_or(meta).to_lowercase();
+    let cyrillic = CYRILLIC.contains(&base.as_str());
+    match guess {
+        Some("ru") => !cyrillic,
+        Some("en") => {
+            cyrillic
+                || !base.chars().all(|c| c.is_ascii_alphabetic())
+                || LATIN_FREE.contains(&base.as_str())
+        }
+        _ => false,
+    }
+}
+
+const LATIN_FREE: [&str; 12] = [
+    "ar", "he", "ur", "fa", "zh", "ja", "ko", "hi", "th", "el", "hy", "ka",
+];
+
+#[derive(PartialEq, Clone, Copy)]
+enum Script {
+    None,
+    Latin,
+    Cyrillic,
+    Other,
+}
+
+fn script(c: char) -> Script {
+    match c {
+        'a'..='z' | 'A'..='Z' | 'À'..='ÿ' => Script::Latin,
+        'а'..='я' | 'А'..='Я' | 'ё' | 'Ё' => Script::Cyrillic,
+        _ if c.is_alphabetic() => Script::Other,
+        _ if c.is_numeric() && !c.is_ascii_digit() => Script::Other,
+        _ => Script::None,
+    }
+}
+
+fn counts(text: &str) -> (usize, usize) {
+    let mut letters = 0;
+    let mut other = 0;
+    for c in text.chars() {
+        match script(c) {
+            Script::None => {}
+            Script::Other => {
+                letters += 1;
+                other += 1;
+            }
+            _ => letters += 1,
+        }
+    }
+    (letters, other)
+}
+
+// ponytail: an abandoned OCR layer, not a general cleaner. A scan run through
+// the wrong language model writes whole runs of another alphabet between the
+// real lines, and they end up inside the same paragraph as the text. A book
+// that uses that alphabet for real keeps everything, because the whole book is
+// measured first. The price is a lone foreign word in a book that has no other
+// — cheap next to an unreadable scan.
+fn drop_ocr_noise(chapters: &mut [Chapter]) {
+    let (letters, other) = chapters
+        .iter()
+        .map(|c| counts(&c.html))
+        .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+    if other == 0 || other * 100 > letters {
+        return;
+    }
+
+    for c in chapters.iter_mut() {
+        let mut out = String::with_capacity(c.html.len());
+        let mut rest = c.html.as_str();
+        loop {
+            let at = rest.find("<p").unwrap_or(rest.len());
+            let (before, block) = rest.split_at(at);
+            out.push_str(&clean(before).0);
+            if block.is_empty() {
+                break;
+            }
+            let end = block.find("</p>").map(|e| e + 4).unwrap_or(block.len());
+            let (block, tail) = block.split_at(end);
+            let (cleaned, touched) = clean(block);
+            if !touched || has_word(&strip_tags(&cleaned)) {
+                out.push_str(&cleaned);
+            }
+            rest = tail;
+        }
+        c.html = out;
+    }
+}
+
+fn has_word(text: &str) -> bool {
+    text.split(|c: char| script(c) == Script::None)
+        .any(|w| w.chars().count() >= 3)
+}
+
+fn clean(html: &str) -> (String, bool) {
+    let mut out = String::with_capacity(html.len());
+    let mut depth = 0usize;
+    let mut touched = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if depth > 0 || ch == '>' {
+            out.push(ch);
+            continue;
+        }
+        if script(ch) == Script::Other || ('\u{200e}'..='\u{200f}').contains(&ch) {
+            touched = true;
+            continue;
+        }
+        if ch == ' ' && out.ends_with(' ') {
+            continue;
+        }
+        out.push(ch);
+    }
+    (out, touched)
+}
+
 pub fn guess_lang(chapters: &[Chapter]) -> Option<&'static str> {
     let (mut cyr, mut lat) = (0usize, 0usize);
     for c in chapters
@@ -1699,6 +1827,52 @@ mod tests {
             Some("en")
         );
         assert_eq!(of("<p>123 — 456</p>"), None);
+    }
+
+    #[test]
+    fn ocr_junk_from_another_alphabet_does_not_reach_the_reader() {
+        let page = |t: &str| Chapter {
+            title: String::new(),
+            html: format!("<p>{t}</p>"),
+        };
+        let english = "<p>Uncle Vernon nearly crashed into the car in front.</p>";
+        let mut book = vec![
+            Chapter {
+                title: String::new(),
+                html: english.repeat(60),
+            },
+            page("rn\u{200f} مد رک کی ری رو ہر AL, rnt\u{200f} یڈ وی ze THE JO"),
+            page("۲ 96و se وہ جوا کھت"),
+        ];
+        drop_ocr_noise(&mut book);
+
+        assert_eq!(book[0].html, english.repeat(60), "чистый текст не трогаем");
+        assert_eq!(book[1].html, "<p>rn AL, rnt ze THE JO</p>");
+        assert_eq!(
+            book[2].html, "",
+            "строка без единой буквы — это шум целиком"
+        );
+
+        let mut arabic = vec![page("مد رک کی ری رو ہر"), page("وہ جوا کھت وج مكو")];
+        let before: Vec<String> = arabic.iter().map(|c| c.html.clone()).collect();
+        drop_ocr_noise(&mut arabic);
+        let after: Vec<String> = arabic.iter().map(|c| c.html.clone()).collect();
+        assert_eq!(after, before, "книга на этом алфавите чистке не подлежит");
+    }
+
+    #[test]
+    fn language_of_the_metadata_loses_to_the_script_of_the_text() {
+        assert!(wrong_script(Some("ur"), Some("en")));
+        assert!(wrong_script(Some("ru"), Some("en")));
+        assert!(wrong_script(Some("en-GB"), Some("ru")));
+        assert!(wrong_script(Some("zh"), Some("en")));
+
+        assert!(!wrong_script(Some("de"), Some("en")));
+        assert!(!wrong_script(Some("en"), Some("en")));
+        assert!(!wrong_script(Some("ru-RU"), Some("ru")));
+        assert!(!wrong_script(Some("uk"), Some("ru")));
+        assert!(!wrong_script(Some("ur"), None));
+        assert!(!wrong_script(None, Some("en")));
     }
 
     #[test]

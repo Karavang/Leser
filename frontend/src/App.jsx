@@ -30,7 +30,7 @@ function App() {
           element={<UserPage />}
         />
         <Route
-          path="/book/:filename"
+          path="/book/:id"
           element={<Reader />}
         />
       </Route>

@@ -56,7 +56,6 @@ struct QuoteRow {
     created_at: DateTime<Utc>,
     /// null, если книгу успели удалить из библиотеки — цитата остаётся
     book_id: Option<Uuid>,
-    ext: Option<String>,
 }
 
 impl QuoteRow {
@@ -68,17 +67,14 @@ impl QuoteRow {
             "position": self.position,
             "createdAt": self.created_at.to_rfc3339(),
             // есть только пока книга в библиотеке: без неё открывать нечего
-            "filename": match (&self.book_id, &self.ext) {
-                (Some(id), Some(ext)) => Some(format!("{id}.{ext}")),
-                _ => None,
-            },
+            "book": self.book_id,
         })
     }
 }
 
 const QUOTE_SELECT: &str = "select q.id, q.title, q.text, q.position, q.created_at,
-            q.book_id, b.ext
-     from quotes q left join books b on b.id = q.book_id
+            q.book_id
+     from quotes q
      where q.user_id = $1 order by q.created_at desc";
 
 pub async fn quotes(
@@ -94,7 +90,7 @@ pub async fn quotes(
 
 #[derive(Deserialize)]
 pub struct QuoteBody {
-    filename: String,
+    book: String,
     text: String,
     /// доля книги; не прислали — цитата просто откроет книгу с начала
     position: Option<String>,
@@ -105,7 +101,7 @@ pub async fn add_quote(
     user: AuthUser,
     Json(body): Json<QuoteBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    let (book_id, _) = parse_filename(&body.filename)?;
+    let (book_id, _) = parse_filename(&body.book)?;
     let text = cut(&body.text, MAX_QUOTE);
     if text.is_empty() {
         return Err(AppError::bad("Пустая цитата", "Empty quote"));
@@ -192,7 +188,7 @@ pub async fn words(
 
 #[derive(Deserialize)]
 pub struct WordBody {
-    filename: String,
+    book: String,
     word: String,
     context: Option<String>,
 }
@@ -202,7 +198,7 @@ pub async fn add_word(
     user: AuthUser,
     Json(body): Json<WordBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    let (book_id, _) = parse_filename(&body.filename)?;
+    let (book_id, _) = parse_filename(&body.book)?;
     let word = cut(&body.word, MAX_WORD);
     if word.is_empty() {
         return Err(AppError::bad("Пустое слово", "Empty word"));

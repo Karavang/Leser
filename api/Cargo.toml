@@ -41,6 +41,12 @@ pdf-extract = "0.9"
 flate2 = "1"
 bzip2 = "0.5"
 liblzma = "0.4"
+# Сжатая версия картинок для иллюстрированных книг: скан на два мегабайта
+# в читалку не отдать. Чистый Rust, без системных библиотек — distroless
+# остаётся distroless. Форматы только те, что реально лежат в книгах.
+image = { version = "0.25", default-features = false, features = [
+    "jpeg", "png", "gif", "webp",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

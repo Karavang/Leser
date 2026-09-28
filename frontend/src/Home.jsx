@@ -113,15 +113,15 @@ export const Home = () => {
   );
 
   // Список правит себя сам: сервер уже подтвердил удаление, перезапрашивать нечего.
-  const onDeleted = useCallback((filename) => {
-    setBooks((bs) => bs.filter((b) => b.filename !== filename));
+  const onDeleted = useCallback((id) => {
+    setBooks((bs) => bs.filter((b) => b.id !== id));
   }, []);
 
   // То же с полкой: книга из библиотеки никуда не делась, поменялась только
   // отметка — и в разделе «мои книги» она сама пропадёт из выдачи.
-  const onShelf = useCallback((filename, mine) => {
+  const onShelf = useCallback((id, mine) => {
     setBooks((bs) =>
-      bs.map((b) => (b.filename === filename ? { ...b, mine } : b)),
+      bs.map((b) => (b.id === id ? { ...b, mine } : b)),
     );
   }, []);
 

@@ -89,7 +89,8 @@ fn all_words_match(param: &str) -> String {
 }
 
 impl Book {
-    /// Форма ответа как у старого Node-бэка: filename собирается из id и ext.
+    /// Книга снаружи — это id; расширение отдельным полем, оно нужно значку
+    /// формата и скачиванию, а не адресу.
     /// `mine`/`canDelete` считает сервер — фронт не должен знать правила прав.
     ///
     /// `mine` — про полку читателя, `canDelete` — про то, кто книгу принёс.
@@ -122,7 +123,7 @@ impl Book {
             "lang": self.lang,
             "desc": self.description,
             "series": self.series,
-            "filename": format!("{}.{}", self.id, self.ext),
+            "ext": self.ext,
             "source": source,
             // ссылка только у внешних: у своей загрузки вести некуда
             "sourceUrl": self.source_url,
@@ -134,19 +135,26 @@ impl Book {
     }
 }
 
-/// `filename` во внешнем API — это `{uuid}.{ext}`. Разбираем строго: наружу
+/// Адрес книги во внешнем API — это её `uuid`; старые ссылки вида
+/// `{uuid}.{ext}` тоже принимаются. Разбираем строго: наружу
 /// не собирается никакой путь, в запрос уходит только проверенный uuid.
-pub fn parse_filename(filename: &str) -> Result<(Uuid, String)> {
-    let (id, ext) = filename
-        .rsplit_once('.')
-        .ok_or_else(|| AppError::bad("Неверное имя файла", "Invalid filename"))?;
-    let id: Uuid = id
-        .parse()
-        .map_err(|_| AppError::bad("Неверное имя файла", "Invalid filename"))?;
-    if ext.is_empty() || !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(AppError::bad("Неверное имя файла", "Invalid filename"));
-    }
-    Ok((id, ext.to_lowercase()))
+// ponytail: the extension is optional so old links with `.epub` keep working.
+// Drop the fallback once no bookmark in the wild carries one.
+pub fn parse_filename(filename: &str) -> Result<(Uuid, Option<String>)> {
+    let bad = || AppError::bad("Неверный адрес книги", "Invalid book address");
+    let (id, ext) = match filename.rsplit_once('.') {
+        Some((id, ext)) => (id, Some(ext)),
+        None => (filename, None),
+    };
+    let id: Uuid = id.parse().map_err(|_| bad())?;
+    let ext = match ext {
+        None => None,
+        Some(e) if !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()) => {
+            Some(e.to_lowercase())
+        }
+        Some(_) => return Err(bad()),
+    };
+    Ok((id, ext))
 }
 
 /// Тип для выдачи самого файла книги.
@@ -180,7 +188,7 @@ pub async fn pages_of(db: &PgPool, user_id: Uuid) -> Result<Vec<serde_json::Valu
 
     Ok(rows
         .into_iter()
-        .map(|(id, ext, page)| serde_json::json!({ "filename": format!("{id}.{ext}"), "page": page }))
+        .map(|(id, ext, page)| serde_json::json!({ "id": id, "ext": ext, "page": page }))
         .collect())
 }
 
@@ -248,30 +256,36 @@ pub async fn download_one(
 ) -> Result<impl IntoResponse> {
     let (id, ext) = parse_filename(&filename)?;
 
-    let row: Option<(Vec<u8>,)> = sqlx::query_as(
-        "select f.data from book_files f join books b on b.id = f.book_id
-         where f.book_id = $1 and b.ext = $2",
+    let row: Option<(Vec<u8>, String, String)> = sqlx::query_as(
+        "select f.data, b.ext, b.title from book_files f join books b on b.id = f.book_id
+         where f.book_id = $1 and ($2::text is null or b.ext = $2)",
     )
     .bind(id)
     .bind(&ext)
     .fetch_optional(&state.db)
     .await?;
 
-    let (data,) = row
+    let (data, ext, title) = row
         .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Файл не найден", "File not found"))?;
 
     Ok((
         [
-            (header::CONTENT_TYPE, content_type(&ext)),
+            (header::CONTENT_TYPE, content_type(&ext).to_string()),
+            // Имя файла теперь не из адреса — в нём один id. Без этого книга
+            // сохранялась бы на диск под uuid и без расширения.
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}.{ext}\"", ascii_name(&title)),
+            ),
             // Файл неизменяем: на каждую загрузку новый id. Значит можно кэшировать
             // навсегда, и повторное открытие книги вообще не дойдёт до сервера.
             (
                 header::CACHE_CONTROL,
-                "private, max-age=31536000, immutable",
+                "private, max-age=31536000, immutable".to_string(),
             ),
             // Тип мы указали сами и угадывать его по содержимому не надо:
             // иначе браузер найдёт в чужом файле html и покажет его как html.
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
         ],
         data,
     ))
@@ -286,7 +300,7 @@ pub async fn download_one(
 /// которое меняет результат: все документы в `book_docs` с меньшей версией
 /// пересоберутся при первом открытии, а браузеры, у которых книга лежит
 /// в кэше, получат новую по ETag.
-pub const DOC_VERSION: i32 = 2;
+pub const DOC_VERSION: i32 = 4;
 
 fn doc_etag(id: Uuid) -> String {
     format!("\"v{DOC_VERSION}-{id}\"")
@@ -311,8 +325,10 @@ async fn reader_doc(
         let chapters = crate::reader::chapters(&ext, &bytes)?;
         let mut doc = head;
         // В txt, pdf и html языку взяться неоткуда — а переносам он нужен.
-        if doc["lang"].is_null() {
-            doc["lang"] = crate::reader::guess_lang(&chapters).into();
+        // И ещё: языку из метаданных верим, только если он сходится с текстом.
+        let guess = crate::reader::guess_lang(&chapters);
+        if doc["lang"].is_null() || crate::reader::wrong_script(doc["lang"].as_str(), guess) {
+            doc["lang"] = guess.into();
         }
         doc["chapters"] = serde_json::to_value(chapters).map_err(AppError::internal)?;
         serde_json::to_string(&doc).map_err(AppError::internal)
@@ -353,7 +369,8 @@ pub async fn read_one(
 
     let doc: Option<(String,)> = sqlx::query_as(
         "select d.doc from book_docs d join books b on b.id = d.book_id
-         where d.book_id = $1 and b.ext = $2 and d.version = $3",
+         where d.book_id = $1 and d.version = $3
+               and ($2::text is null or b.ext = $2)",
     )
     .bind(id)
     .bind(&ext)
@@ -383,21 +400,40 @@ pub async fn read_one(
         .into_response())
 }
 
-async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
-    let row: Option<(Vec<u8>, String, String, Option<String>)> = sqlx::query_as(
-        "select f.data, b.title, b.author, b.lang
+/// ponytail: ascii only, so the header needs no RFC 5987 encoding. A Russian
+/// title falls back to the id — the extension is what actually matters here.
+fn ascii_name(title: &str) -> String {
+    let name: String = title
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let name = name.trim_matches('_').to_string();
+    if name.replace('_', "").is_empty() {
+        "book".to_string()
+    } else {
+        name.chars().take(60).collect()
+    }
+}
+
+async fn rebuild_doc(state: &AppState, id: Uuid, ext: &Option<String>) -> Result<String> {
+    type Row = (Vec<u8>, String, String, String, Option<String>);
+    let row: Option<Row> = sqlx::query_as(
+        "select f.data, b.ext, b.title, b.author, b.lang
          from book_files f join books b on b.id = f.book_id
-         where f.book_id = $1 and b.ext = $2",
+         where f.book_id = $1 and ($2::text is null or b.ext = $2)",
     )
     .bind(id)
     .bind(ext)
     .fetch_optional(&state.db)
     .await?;
 
-    let (data, title, author, lang) = row
+    let (data, ext, title, author, lang) = row
         .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Файл не найден", "File not found"))?;
 
-    let doc = reader_doc(ext, data.into(), &title, &author, &lang).await?;
+    let doc = reader_doc(&ext, data.into(), &title, &author, &lang).await?;
+    let (doc, imgs) = crate::images::extract(doc);
+
+    let mut tx = state.db.begin().await?;
     sqlx::query(
         "insert into book_docs (book_id, doc, version) values ($1, $2, $3)
          on conflict (book_id) do update set doc = excluded.doc, version = excluded.version",
@@ -405,9 +441,38 @@ async fn rebuild_doc(state: &AppState, id: Uuid, ext: &str) -> Result<String> {
     .bind(id)
     .bind(&doc)
     .bind(DOC_VERSION)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+
+    sqlx::query("delete from book_images where book_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("update books set illustrated = $2 where id = $1")
+        .bind(id)
+        .bind(!imgs.is_empty())
+        .execute(&mut *tx)
+        .await?;
+    put_images(&mut tx, id, &imgs).await?;
+    tx.commit().await?;
     Ok(doc)
+}
+
+async fn put_images(
+    tx: &mut sqlx::PgConnection,
+    book: Uuid,
+    imgs: &[crate::images::Img],
+) -> Result<()> {
+    for (i, img) in imgs.iter().enumerate() {
+        sqlx::query("insert into book_images (book_id, idx, mime, data) values ($1, $2, $3, $4)")
+            .bind(book)
+            .bind(i as i32)
+            .bind(&img.mime)
+            .bind(&img.data)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Название книги из имени файла — для форматов, где названию внутри просто
@@ -496,6 +561,7 @@ async fn store_book(
     // всё равно нечем, и лучше сказать об этом при загрузке, чем оставить
     // в библиотеке книгу, которая не открывается.
     let doc = reader_doc(ext, bytes.clone(), &meta.title, &meta.author, &meta.lang).await?;
+    let (doc, imgs) = crate::images::extract(doc);
 
     // Метаданные, файл и разбор — одной транзакцией. Строки без файла (сломала бы
     // читалку) и файла без строки (мусор) не бывает по построению — с S3 это
@@ -530,6 +596,14 @@ async fn store_book(
         .bind(DOC_VERSION)
         .execute(&mut *tx)
         .await?;
+
+    if !imgs.is_empty() {
+        put_images(&mut tx, id, &imgs).await?;
+        sqlx::query("update books set illustrated = true where id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
 
     // Кто книгу принёс, у того она сразу и в «моих»: отдельно откладывать
     // себе только что загруженную книгу — лишний шаг.
@@ -644,8 +718,8 @@ pub async fn import(
         .is_some_and(|n| n > MAX_UPLOAD as u64)
     {
         return Err(AppError::bad(
-            "Книга больше 64 МБ",
-            "The book is over 64 MB",
+            "Книга больше 256 МБ",
+            "The book is over 256 MB",
         ));
     }
     let bytes = response.bytes().await.map_err(|e| {
@@ -656,8 +730,8 @@ pub async fn import(
     })?;
     if bytes.len() > MAX_UPLOAD {
         return Err(AppError::bad(
-            "Книга больше 64 МБ",
-            "The book is over 64 MB",
+            "Книга больше 256 МБ",
+            "The book is over 256 MB",
         ));
     }
 
@@ -752,7 +826,7 @@ pub async fn remove_from_my(
 
 #[derive(Deserialize)]
 pub struct FlipBody {
-    filename: String,
+    book: String,
     page: String,
 }
 
@@ -762,7 +836,7 @@ pub async fn page_was_flipped(
     user: AuthUser,
     Json(body): Json<FlipBody>,
 ) -> Result<StatusCode> {
-    let (book_id, _) = parse_filename(&body.filename)?;
+    let (book_id, _) = parse_filename(&body.book)?;
 
     sqlx::query(
         "insert into reading_progress (user_id, book_id, position) values ($1, $2, $3)
@@ -868,11 +942,12 @@ mod tests {
     }
 
     #[test]
-    fn filenames() {
+    fn book_address_is_the_id_and_the_extension_is_optional() {
         let id = Uuid::new_v4();
+        assert_eq!(parse_filename(&id.to_string()).unwrap(), (id, None));
         assert_eq!(
             parse_filename(&format!("{id}.EPUB")).unwrap(),
-            (id, "epub".into())
+            (id, Some("epub".into()))
         );
         for bad in [
             "",
@@ -885,5 +960,17 @@ mod tests {
         ] {
             assert!(parse_filename(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn download_name_is_safe_for_a_header() {
+        assert_eq!(
+            ascii_name("Harry Potter & the Stone"),
+            "Harry_Potter___the_Stone"
+        );
+        assert_eq!(ascii_name("Час Презрения"), "book");
+        assert_eq!(ascii_name("\"; rm -rf /"), "rm_-rf".replace('-', "_"));
+        assert_eq!(ascii_name("").len(), 4);
+        assert!(ascii_name(&"x".repeat(200)).len() <= 60);
     }
 }
