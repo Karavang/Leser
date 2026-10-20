@@ -7,6 +7,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use sha2::Digest;
 // chrono приезжает вместе с sqlx (фича "chrono"), отдельной зависимости не нужно
 use sqlx::{
     types::chrono::{DateTime, Utc},
@@ -536,7 +537,8 @@ async fn store_book(
     name: &str,
     bytes: axum::body::Bytes,
     source_url: Option<&str>,
-) -> Result<String> {
+    force: bool,
+) -> Result<Stored> {
     // .rda хранить как есть незачем: читалки под него нет, а текст внутри
     // обычный. Превращаем в fb2 здесь, и дальше он ничем не отличается
     // от книги, загруженной файлом.
@@ -554,6 +556,29 @@ async fn store_book(
     // Имя файла — единственное, что о книге вообще известно.
     if meta.title == crate::parse::UNTITLED {
         meta.title = title_from_filename(name);
+    }
+
+    let hash = sha2::Sha256::digest(&bytes).to_vec();
+    let same: Option<(Uuid,)> =
+        sqlx::query_as("select book_id from book_files where sha256 = $1 limit 1")
+            .bind(&hash)
+            .fetch_optional(&state.db)
+            .await?;
+    if let Some((id,)) = same {
+        sqlx::query(
+            "insert into shelf (user_id, book_id) values ($1, $2)
+             on conflict (user_id, book_id) do nothing",
+        )
+        .bind(owner)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+        return Ok(Stored::Same(id));
+    }
+    if !force {
+        if let Some(id) = similar_book(&state.db, &meta.title, &meta.author).await? {
+            return Ok(Stored::Similar(id));
+        }
     }
 
     // Книга разбирается для читалки здесь же, один раз на всю жизнь книги.
@@ -584,9 +609,10 @@ async fn store_book(
     .fetch_one(&mut *tx)
     .await?;
 
-    sqlx::query("insert into book_files (book_id, data) values ($1, $2)")
+    sqlx::query("insert into book_files (book_id, data, sha256) values ($1, $2, $3)")
         .bind(id)
         .bind(bytes.as_ref())
+        .bind(&hash)
         .execute(&mut *tx)
         .await?;
 
@@ -614,14 +640,60 @@ async fn store_book(
         .await?;
     tx.commit().await?;
 
-    Ok(format!("{id}.{ext}"))
+    Ok(Stored::New(id))
+}
+
+enum Stored {
+    New(Uuid),
+    Same(Uuid),
+    Similar(Uuid),
+}
+
+// ponytail: trigram similarity over every book, a seq scan per upload. Fine for a personal library;
+// at tens of thousands of books add a gin_trgm_ops index on title.
+async fn similar_book(db: &PgPool, title: &str, author: &str) -> Result<Option<Uuid>> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "select id from books
+         where similarity(title, $1) >= $3
+           and (author = '' or $2 = '' or lower(author) = lower($2) or similarity(author, $2) >= $4)
+         order by similarity(title, $1) desc
+         limit 1",
+    )
+    .bind(title)
+    .bind(author)
+    .bind(SAME_TITLE)
+    .bind(SAME_AUTHOR)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|(id,)| id))
+}
+
+const SAME_TITLE: f32 = 0.8;
+const SAME_AUTHOR: f32 = 0.6;
+
+async fn one_book(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<serde_json::Value> {
+    let sql = format!("select {BOOK_COLS} {BOOK_FROM} where b.id = $2");
+    let book = sqlx::query_as::<_, Book>(&sql)
+        .bind(user.id)
+        .bind(id)
+        .fetch_optional(db)
+        .await?
+        .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found"))?;
+    Ok(book.to_json(user))
+}
+
+#[derive(Deserialize)]
+pub struct UploadQuery {
+    #[serde(default)]
+    force: bool,
 }
 
 pub async fn put_new_one(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
+    Query(upload): Query<UploadQuery>,
     mut multipart: Multipart,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<axum::response::Response> {
     let mut file = None;
     while let Some(field) = multipart.next_field().await? {
         if field.name() == Some("file") {
@@ -634,11 +706,73 @@ pub async fn put_new_one(
         file.ok_or_else(|| AppError::bad("Файл не приложен", "No file uploaded"))?;
     let ext = book_ext(&name)?;
 
-    let location = store_book(&state, user.id, &ext, &name, bytes, None).await?;
-    Ok(Json(serde_json::json!({
-        "message": "File uploaded successfully",
-        "location": location,
-    })))
+    let (code, duplicate, id) =
+        match store_book(&state, user.id, &ext, &name, bytes, None, upload.force).await? {
+            Stored::New(id) => (StatusCode::OK, None, id),
+            Stored::Same(id) => (StatusCode::CONFLICT, Some("same"), id),
+            Stored::Similar(id) => (StatusCode::CONFLICT, Some("similar"), id),
+        };
+    let book = one_book(&state.db, &user, id).await?;
+    Ok((
+        code,
+        Json(serde_json::json!({ "book": book, "duplicate": duplicate })),
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct EditBody {
+    title: String,
+    author: String,
+    series: Option<String>,
+}
+
+pub async fn edit_one(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(filename): Path<String>,
+    Json(body): Json<EditBody>,
+) -> Result<Json<serde_json::Value>> {
+    let (id, _) = parse_filename(&filename)?;
+    let meta = crate::parse::Meta {
+        title: body.title,
+        author: body.author,
+        series: body.series,
+        ..Default::default()
+    }
+    .sanitized();
+    if meta.title == crate::parse::UNTITLED {
+        return Err(AppError::bad("Нужно название", "A title is required"));
+    }
+
+    let mut tx = state.db.begin().await?;
+    let edited = sqlx::query(
+        "update books set title = $4, author = $5, series = $6
+         where id = $1 and (owner_id = $2 or $3)",
+    )
+    .bind(id)
+    .bind(user.id)
+    .bind(user.admin)
+    .bind(&meta.title)
+    .bind(&meta.author)
+    .bind(&meta.series)
+    .execute(&mut *tx)
+    .await?;
+    if edited.rows_affected() == 0 {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "Это не ваша книга",
+            "Not your book",
+        ));
+    }
+    // ponytail: the parsed doc carries the old title in its head; version 0 makes /read rebuild it once.
+    sqlx::query("update book_docs set version = 0 where book_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(Json(one_book(&state.db, &user, id).await?))
 }
 
 /// Поиск за пределами своей библиотеки. Отдельным запросом, а не внутри
@@ -736,7 +870,10 @@ pub async fn import(
     }
 
     let source = body.page_url.as_deref().unwrap_or(&body.url);
-    let location = store_book(&state, user.id, &ext, url.path(), bytes, Some(source)).await?;
+    let location =
+        match store_book(&state, user.id, &ext, url.path(), bytes, Some(source), true).await? {
+            Stored::New(id) | Stored::Same(id) | Stored::Similar(id) => id,
+        };
 
     Ok(Json(serde_json::json!({
         "message": "Книга добавлена в библиотеку",

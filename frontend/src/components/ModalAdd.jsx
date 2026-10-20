@@ -36,6 +36,9 @@ const STATE = {
   // как «всё повисло».
   send: (item) => (item.percent >= 100 ? t("parsing") : `${item.percent}%`),
   done: () => t("uploaded"),
+  same: () => t("alreadyHere"),
+  removed: () => t("removed"),
+  skipped: () => t("skipped"),
   fail: (item) => item.message,
 };
 
@@ -70,7 +73,9 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
   const patch = (id, fields) =>
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...fields } : i)));
 
-  const send = async (item) => {
+  const auth = { headers: { Authorization: `Bearer ${user.token}` } };
+
+  const send = async (item, force = false) => {
     const ext = item.file.name.split(".").pop().toLowerCase();
     if (!BOOK_TYPES.includes(ext)) {
       return patch(item.id, { state: "fail", message: t("badFormat") });
@@ -79,21 +84,27 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
       return patch(item.id, { state: "fail", message: t("tooBig", MAX_MB) });
     }
 
-    patch(item.id, { state: "send" });
+    patch(item.id, { state: "send", percent: 0 });
     const form = new FormData();
     form.append("file", item.file);
     try {
-      await axios.post("/api/putNewOne", form, {
+      const { data } = await axios.post(`/api/putNewOne${force ? "?force=true" : ""}`, form, {
         // Content-Type ставит браузер: только он знает границу частей.
         headers: { Authorization: `Bearer ${user.token}` },
         onUploadProgress: (e) =>
           e.total &&
           patch(item.id, { percent: Math.round((e.loaded / e.total) * 100) }),
       });
-      patch(item.id, { state: "done" });
+      patch(item.id, { state: "check", book: data.book });
       // книга уже в базе — список обновляем сразу, а не к перезагрузке
       onAdded?.();
     } catch (error) {
+      const dup = error.response?.status === 409 && error.response.data;
+      if (dup) {
+        patch(item.id, { state: dup.duplicate, book: dup.book });
+        if (dup.duplicate === "same") onAdded?.();
+        return;
+      }
       // Сообщение присылает бэк; но 502 от nginx или обрыв связи приходят
       // без него — тогда хотя бы код, иначе причину не отличить от причины.
       const said = error.response?.data?.message;
@@ -102,6 +113,34 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
         state: "fail",
         message: said ?? (code ? `${t("uploadFailed")} (${code})` : t("uploadFailed")),
       });
+    }
+  };
+
+  const edit = async (item, form) => {
+    try {
+      const { data } = await axios.post(
+        `/api/editBook/${item.book.id}`,
+        {
+          title: form.get("title"),
+          author: form.get("author"),
+          series: form.get("series"),
+        },
+        auth,
+      );
+      patch(item.id, { state: "done", book: data });
+      onAdded?.();
+    } catch (error) {
+      patch(item.id, { editError: error.response?.data?.message ?? t("saveFailed") });
+    }
+  };
+
+  const remove = async (item) => {
+    try {
+      await axios.delete(`/api/deleteOne/${item.book.id}`, auth);
+      patch(item.id, { state: "removed" });
+      onAdded?.();
+    } catch (error) {
+      patch(item.id, { editError: error.response?.data?.message ?? t("deleteFailed") });
     }
   };
 
@@ -188,11 +227,81 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
           <ul className="uploads">
             {items.map((item) => (
               <li key={item.id} className={item.state}>
-                <span className="uploadName">{item.file.name}</span>
-                <span className="uploadState">{STATE[item.state](item)}</span>
+                <span className="uploadName">
+                  {item.book && item.state !== "similar" ? item.book.title : item.file.name}
+                </span>
+                {STATE[item.state] && (
+                  <span className="uploadState">{STATE[item.state](item)}</span>
+                )}
+                {item.state === "fail" && (
+                  <button type="button" className="uploadAct" onClick={() => send(item)}>
+                    {t("retry")}
+                  </button>
+                )}
                 {item.state === "send" && (
                   <div className="uploadBar">
                     <div style={{ width: `${item.percent}%` }} />
+                  </div>
+                )}
+                {item.state === "check" && (
+                  <div className="uploadCheck">
+                    <BookLine book={item.book} />
+                    <p>{t("isRight")}</p>
+                    <div className="uploadActs">
+                      <button type="button" onClick={() => patch(item.id, { state: "done" })}>
+                        {t("looksRight")}
+                      </button>
+                      <button type="button" onClick={() => patch(item.id, { state: "edit" })}>
+                        {t("fixMeta")}
+                      </button>
+                      <button type="button" className="danger" onClick={() => remove(item)}>
+                        {t("removeUpload")}
+                      </button>
+                    </div>
+                    {item.editError && <p className="uploadError">{item.editError}</p>}
+                  </div>
+                )}
+                {item.state === "edit" && (
+                  <form
+                    className="uploadCheck"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      edit(item, new FormData(e.currentTarget));
+                    }}
+                  >
+                    <label>
+                      {t("bookTitle")}
+                      <input name="title" required defaultValue={item.book.title} />
+                    </label>
+                    <label>
+                      {t("bookAuthor")}
+                      <input name="author" defaultValue={item.book.author} />
+                    </label>
+                    <label>
+                      {t("series")}
+                      <input name="series" defaultValue={item.book.series ?? ""} />
+                    </label>
+                    <div className="uploadActs">
+                      <button type="submit">{t("saveMeta")}</button>
+                      <button type="button" onClick={() => patch(item.id, { state: "check" })}>
+                        {t("cancel")}
+                      </button>
+                    </div>
+                    {item.editError && <p className="uploadError">{item.editError}</p>}
+                  </form>
+                )}
+                {item.state === "similar" && (
+                  <div className="uploadCheck">
+                    <p>{t("similarHere")}</p>
+                    <BookLine book={item.book} />
+                    <div className="uploadActs">
+                      <button type="button" onClick={() => send(item, true)}>
+                        {t("addAnyway")}
+                      </button>
+                      <button type="button" onClick={() => patch(item.id, { state: "skipped" })}>
+                        {t("skip")}
+                      </button>
+                    </div>
                   </div>
                 )}
               </li>
@@ -203,3 +312,14 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
     </dialog>
   );
 };
+
+const BookLine = ({ book }) => (
+  <div className="uploadBook">
+    <b>{book.title}</b>
+    <span>{book.author || t("noAuthor")}</span>
+    {book.series && <span>{book.series}</span>}
+    <small>
+      {[book.ext, book.lang, book.date?.slice(0, 4)].filter(Boolean).join(" · ")}
+    </small>
+  </div>
+);

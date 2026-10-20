@@ -214,6 +214,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/imgToken/{filename}", get(images::token_for))
         .route("/img/{id}/{idx}", get(images::one))
         .route("/deleteOne/{filename}", delete(books::delete_one))
+        .route("/editBook/{filename}", post(books::edit_one))
         // Большой лимит только на загрузку книги: JSON-эндпоинты остаются
         // с дефолтными 2 МБ, чтобы их нельзя было завалить телом на 64 МБ.
         .route(

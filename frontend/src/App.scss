@@ -865,12 +865,12 @@ li {
 
 .uploads {
   margin-top: 16px;
-  max-height: 220px;
+  max-height: 50vh;
   overflow-y: auto;
 
   li {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
     gap: 6px 12px;
     align-items: center;
     padding: 8px 0;
@@ -900,6 +900,82 @@ li {
   .fail .uploadState {
     color: var(--danger);
     opacity: 1;
+  }
+
+  .done .uploadState,
+  .same .uploadState {
+    color: var(--ok);
+    opacity: 1;
+  }
+
+  .uploadCheck {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--dim) 12%, transparent);
+
+    p {
+      margin: 0;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 0.8rem;
+    }
+    input {
+      font: inherit;
+      font-size: 0.9rem;
+      padding: 4px 6px;
+    }
+  }
+
+  .uploadBook {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    small {
+      opacity: 0.6;
+    }
+  }
+
+  .uploadActs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .uploadActs button,
+  .uploadAct {
+    font: inherit;
+    font-size: 0.82rem;
+    padding: 4px 10px;
+    border: 1px solid var(--back-orange);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--back-orange);
+    }
+    &.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    &.danger:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+  }
+
+  .uploadError {
+    color: var(--danger);
+    font-size: 0.82rem;
   }
 
   .uploadBar {
