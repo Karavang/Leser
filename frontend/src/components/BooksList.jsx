@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
 import { t } from "../i18n";
 
+const HOVER = matchMedia("(hover: hover)").matches;
+
 export const BooksList = ({ books, onDeleted, onShelf }) => {
   const navigate = useNavigate();
 
@@ -57,8 +59,8 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
           {books.map((book) => (
             <li
               key={book.id}
-              onMouseEnter={() => setEnter(book.id)}
-              onMouseLeave={() => setEnter(null)}
+              onMouseEnter={() => HOVER && setEnter(book.id)}
+              onMouseLeave={() => HOVER && setEnter(null)}
               onClick={() => navigate(`/book/${book.id}`)}
             >
               {/* Карточка — название и автор, дальше подробности. Даты тут
@@ -69,20 +71,25 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
               ) : (
                 <>
                   <h2>{book.title}</h2>
-                  <h3>{book.author}</h3>
+                  <h3>
+                    {book.author}
+                    <span className="bookExt">{book.ext}</span>
+                  </h3>
                 </>
               )}
               <div className="bookFooter">
-                {isEnter === book.id && (
+                {(isEnter === book.id || !HOVER) && (
                   <button
                     className="detailsButton"
+                    title={t("more")}
+                    aria-label={t("more")}
                     onClick={(e) => {
                       // иначе клик дойдёт до li и откроет читалку
                       e.stopPropagation();
                       setDetails(book);
                     }}
                   >
-                    {t("more")}
+                    {HOVER ? t("more") : "⋯"}
                   </button>
                 )}
                 {/* Видно всегда, а не по наведению: по этой отметке и понятно,

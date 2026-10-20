@@ -16,6 +16,7 @@ export const RU = {
   // библиотека
   tabLibrary: "Библиотека",
   tabMine: "Мои книги",
+  continueReading: "Продолжить",
   searchPlaceholder: "Название, автор или серия",
   noBooks: "Книг пока нет",
   more: "Подробнее",
@@ -153,6 +154,7 @@ export const EN = {
 
   tabLibrary: "Library",
   tabMine: "My books",
+  continueReading: "Continue reading",
   searchPlaceholder: "Title, author or series",
   noBooks: "No books yet",
   more: "Details",
@@ -282,6 +284,7 @@ export const UK = {
 
   tabLibrary: "Бібліотека",
   tabMine: "Мої книжки",
+  continueReading: "Продовжити",
   searchPlaceholder: "Назва, автор або серія",
   noBooks: "Книжок поки немає",
   more: "Докладніше",
@@ -410,6 +413,7 @@ export const PL = {
 
   tabLibrary: "Biblioteka",
   tabMine: "Moje książki",
+  continueReading: "Czytaj dalej",
   searchPlaceholder: "Tytuł, autor lub cykl",
   noBooks: "Nie ma jeszcze książek",
   more: "Szczegóły",
@@ -538,6 +542,7 @@ export const DE = {
 
   tabLibrary: "Bibliothek",
   tabMine: "Meine Bücher",
+  continueReading: "Weiterlesen",
   searchPlaceholder: "Titel, Autor oder Reihe",
   noBooks: "Noch keine Bücher",
   more: "Details",

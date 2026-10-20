@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { CHAPTERS } from "./setup.js";
 
 const book = () => JSON.parse(readFileSync("e2e/.book.json", "utf8"));
+const older = () => JSON.parse(readFileSync("e2e/.older.json", "utf8"));
 
 const fitsWidth = async (page) =>
   expect(
@@ -10,7 +11,7 @@ const fitsWidth = async (page) =>
   ).toBeLessThanOrEqual(0);
 
 const openBook = async (page) => {
-  await page.goto(`/book/${book().id}`);
+  await page.goto(`/book/${book().id}?at=0`);
   await expect(page.locator(".readerPages section").first()).toBeVisible();
 };
 
@@ -23,7 +24,15 @@ const tapAt = async (page, fx, fy) => {
 };
 
 const hudShown = (page) => expect(page.locator(".reader")).not.toHaveClass(/\bbare\b/);
-const hudHidden = (page) => expect(page.locator(".reader")).toHaveClass(/\bbare\b/);
+const hudHidden = async (page) => {
+  await expect(page.locator(".reader")).toHaveClass(/\bbare\b/);
+  await expect
+    .poll(async () => {
+      const bar = await page.locator(".readerBar").boundingBox();
+      return bar.y + bar.height;
+    })
+    .toBeLessThanOrEqual(1);
+};
 
 const swipe = (page, dx) =>
   page.locator(".readerViewport").evaluate((el, dx) => {
@@ -65,6 +74,85 @@ test.describe("library", () => {
     await expect(page.locator("body")).not.toBeEmpty();
     await fitsWidth(page);
   });
+
+  test("profile scrolls down to the settings and past them", async ({ page }) => {
+    await page.goto("/me");
+    const settings = page.locator("details.settings");
+    await expect(settings).toBeAttached();
+    const scrollTo = (loc) =>
+      loc.evaluate((el) => {
+        for (let box = el.parentElement; box; box = box.parentElement) {
+          const { overflowY } = getComputedStyle(box);
+          if (/auto|scroll/.test(overflowY) && box.scrollHeight > box.clientHeight) {
+            box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+          }
+        }
+        window.scrollBy(0, el.getBoundingClientRect().top - 40);
+        const r = el.getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= window.innerHeight;
+      });
+
+    expect(await scrollTo(settings.locator("summary"))).toBe(true);
+    await settings.locator("summary").click();
+    expect(await scrollTo(settings.locator(".settingsRow").last())).toBe(true);
+  });
+
+  for (const width of [320, 360, 375, 390, 414]) {
+    test(`header icons stay whole at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await page.goto("/");
+      const parts = [page.locator(".searchingLine"), page.getByTitle("Добавить книги").first()];
+      const boxes = [];
+      for (const part of parts) {
+        await expect(part).toBeVisible();
+        boxes.push(await part.boundingBox());
+      }
+      for (const box of boxes.slice(1)) {
+        expect(box.width).toBeGreaterThanOrEqual(28);
+        expect(box.height).toBeGreaterThanOrEqual(28);
+      }
+      for (const box of boxes) {
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+      }
+      for (let i = 1; i < boxes.length; i++) {
+        expect(boxes[i].x).toBeGreaterThanOrEqual(boxes[i - 1].x + boxes[i - 1].width);
+      }
+      const profile = page.getByRole("button", { name: "Профиль" }).filter({ visible: true }).first();
+      await expect(profile).toBeVisible();
+      const p = await profile.boundingBox();
+      expect(p.x + p.width).toBeLessThanOrEqual(width);
+      await fitsWidth(page);
+    });
+  }
+
+  test("an empty shelf opens the library, and search looks through all of it", async ({ page }) => {
+    const empty = JSON.parse(readFileSync("e2e/.empty.json", "utf8"));
+    await page.addInitScript((user) => {
+      localStorage.setItem("token", JSON.stringify(user.token));
+      localStorage.setItem("user", JSON.stringify(user));
+    }, empty);
+    await page.goto("/");
+    await expect(page.locator(".bookList li h2").getByText(book().title, { exact: true })).toBeVisible();
+    await expect(page.locator(".continue")).toHaveCount(0);
+  });
+
+  test("search on my books looks through the whole library", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".bookList li h2").first()).toBeVisible();
+    await page.locator(".searchingLine").fill("чужая");
+    await expect(page.locator(".bookList li h2").getByText("E2E чужая книга")).toBeVisible();
+  });
+
+  test("my books open by default, most recently read first", async ({ page }) => {
+    await page.goto("/");
+    const titles = page.locator(".bookList li h2");
+    await expect(titles.first()).toBeVisible();
+    const shown = await titles.allTextContents();
+    const mine = shown.filter((t) => t.startsWith("E2E"));
+    expect(mine).toEqual([book().title, older().title]);
+    await expect(page.locator(".continue button").first()).toContainText(book().title);
+  });
 });
 
 test.describe("reader", () => {
@@ -80,12 +168,16 @@ test.describe("reader", () => {
 
     await tapAt(page, 0.5, 0.05);
     await hudShown(page);
-    expect((await page.locator(".readerBar").boundingBox()).y).toBeGreaterThanOrEqual(0);
+    await expect
+      .poll(async () => (await page.locator(".readerBar").boundingBox()).y)
+      .toBeGreaterThanOrEqual(0);
     await tapAt(page, 0.5, 0.5);
     await hudHidden(page);
   });
 
-  test("swipes flip pages", async ({ page }) => {
+  test("swipes flip pages", async ({ page, browserName }) => {
+    // ponytail: WebKit has no `new Touch()`, so swipes are only checked in Chromium; tap zones cover iPhones.
+    test.skip(browserName === "webkit", "no synthetic Touch in WebKit");
     await openBook(page);
     await swipe(page, -120);
     await expect.poll(() => pageNo(page)).toBe(2);
@@ -97,7 +189,7 @@ test.describe("reader", () => {
     await openBook(page);
     await tapAt(page, 0.5, 0.05);
     await page.getByTitle("Оглавление").click();
-    const items = page.locator(".readerToc ol button");
+    const items = page.locator(".readerToc ol button span");
     await expect(items).toHaveText(CHAPTERS);
   });
 
@@ -123,7 +215,7 @@ test.describe("reader", () => {
     await expect(toc).toBeHidden();
 
     await openToc();
-    await tapAt(page, 0.05, 0.5);
+    await tapAt(page, 0.05, 0.12);
     await expect(toc).toBeHidden();
     await expect.poll(() => pageNo(page)).toBe(1);
 

@@ -105,10 +105,11 @@ const UserPage = () => {
 
   return (
     <div className="userPage">
-      <div
+      <button
         className="closeButton"
         onClick={() => navigate("/")}
         title={t("toLibrary")}
+        aria-label={t("toLibrary")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -118,7 +119,7 @@ const UserPage = () => {
         >
           <path d="M226.67-186.67h140v-246.66h226.66v246.66h140v-380L480-756.67l-253.33 190v380ZM160-120v-480l320-240 320 240v480H526.67v-246.67h-93.34V-120H160Zm320-352Z" />
         </svg>
-      </div>
+      </button>
       <div className="userDetails">
         <h1>{user.username}</h1>
         <h2>{user.email}</h2>

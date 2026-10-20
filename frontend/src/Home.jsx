@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { AddButton } from "./components/AddButton";
 import { BooksList } from "./components/BooksList";
+import { ContinueReading } from "./components/ContinueReading";
 import { SearchingLine } from "./components/SearchingLine";
 import { SourceResults } from "./components/SourceResults";
 import UserButton from "./components/UserButton";
@@ -11,11 +12,33 @@ import { BusyLine, Loading } from "./ui/Loading";
 import { clearSession } from "./session";
 import { t } from "./i18n";
 
+const icon = (d) => (
+  <svg
+    aria-hidden="true"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d={d} />
+  </svg>
+);
+const STAR = icon("M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z");
+const SHELF = icon("M4 5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 1-2-2zM13 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5z");
+const PERSON = icon("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c1.5-4 4.5-6 8-6s6.5 2 8 6");
+
 export const Home = () => {
   const [books, setBooks] = useState([]);
   const [found, setFound] = useState([]);
   const [filter, setFilter] = useState("");
-  const [tab, setTab] = useState("library");
+  const [chosen, setTab] = useState(null);
+  const [hasShelf, setHasShelf] = useState(false);
+  const searching = Boolean(filter.trim());
+  const tab = chosen ?? (hasShelf && !searching ? "mine" : "library");
   const [loading, setLoading] = useState(true);
   // повторные запросы — поиск, вкладка, возврат — идут поверх показанного списка
   const [busy, setBusy] = useState(false);
@@ -47,6 +70,7 @@ export const Home = () => {
           headers: { Authorization: `Bearer ${token}` },
         });
         setBooks(response.data);
+        if (!filter.trim()) setHasShelf(response.data.some((book) => book.mine));
       } catch (error) {
         // токен протух за 30 дней жизни — на вход, а не в пустой экран
         if (error.response?.status === 401) {
@@ -108,9 +132,32 @@ export const Home = () => {
   // Раздел — единственное, что осталось фильтровать на клиенте: mine приходит
   // с бэка вместе с книгой, отдельный запрос ради этого не нужен.
   const shownBooks = useMemo(
-    () => (tab === "library" ? books : books.filter((book) => book.mine)),
-    [books, tab],
+    () =>
+      tab === "library"
+        ? books
+        : books
+            .filter((book) => book.mine)
+            .sort((a, b) =>
+              searching ? 0 : (b.readAt ?? "").localeCompare(a.readAt ?? ""),
+            ),
+    [books, tab, searching],
   );
+  const recent = useMemo(
+    () =>
+      books
+        .filter((book) => book.readAt)
+        .sort((a, b) => b.readAt.localeCompare(a.readAt))
+        .slice(0, 3),
+    [books],
+  );
+  const pick = (next) => () => {
+    setTab(next);
+    window.scrollTo(0, 0);
+  };
+  const sections = [
+    ["mine", t("tabMine")],
+    ["library", t("tabLibrary")],
+  ];
 
   // Список правит себя сам: сервер уже подтвердил удаление, перезапрашивать нечего.
   const onDeleted = useCallback((id) => {
@@ -126,7 +173,23 @@ export const Home = () => {
   }, []);
 
   return (
-    <div>
+    <div className="home">
+      <nav className="sideNav" aria-label={t("tabLibrary")}>
+        <b>Leser</b>
+        {sections.map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "active" : ""}
+            aria-current={tab === key ? "page" : undefined}
+            onClick={pick(key)}
+          >
+            {label}
+          </button>
+        ))}
+        <button onClick={() => navigate("/me")}>{t("quotes")}</button>
+        <button onClick={() => navigate("/me")}>{t("dictionary")}</button>
+        <button onClick={() => navigate("/me")}>{t("profile")}</button>
+      </nav>
       {busy && !loading && <BusyLine />}
       {/* Всё, кроме списка, остаётся на экране при прокрутке. Одна липкая
           обёртка вместо двух: иначе второй пришлось бы вручную считать
@@ -138,20 +201,18 @@ export const Home = () => {
           <UserButton />
         </div>
         <div className="tabs">
-          <button
-            className={tab === "library" ? "active" : ""}
-            onClick={() => setTab("library")}
-          >
-            {t("tabLibrary")}
-          </button>
-          <button
-            className={tab === "mine" ? "active" : ""}
-            onClick={() => setTab("mine")}
-          >
-            {t("tabMine")}
-          </button>
+          {sections.map(([key, label]) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={pick(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
+      {tab === "mine" && !searching && <ContinueReading books={recent} />}
       {loading ? (
         <Loading />
       ) : (
@@ -168,6 +229,23 @@ export const Home = () => {
         />
       )}
       {upButtonShow && <UpButton />}
+      <nav className="bottomNav" aria-label={t("tabLibrary")}>
+        {sections.map(([key, label]) => (
+          <button
+            key={key}
+            className={tab === key ? "active" : ""}
+            aria-current={tab === key ? "page" : undefined}
+            onClick={pick(key)}
+          >
+            {key === "mine" ? STAR : SHELF}
+            {label}
+          </button>
+        ))}
+        <button onClick={() => navigate("/me")}>
+          {PERSON}
+          {t("profile")}
+        </button>
+      </nav>
     </div>
   );
 };

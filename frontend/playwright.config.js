@@ -19,6 +19,10 @@ export default defineConfig({
     { name: "android", use: { ...devices["Pixel 7"] } },
     { name: "iphone", use: { ...devices["iPhone 13"] } },
     { name: "iphone-se", use: { ...devices["iPhone SE"] } },
+    { name: "iphone-max", use: { ...devices["iPhone 14 Pro Max"] } },
+    { name: "ipad-mini", use: { ...devices["iPad Mini"] } },
+    { name: "ipad-pro-landscape", use: { ...devices["iPad Pro 11 landscape"] } },
+    { name: "android-tablet", use: { ...devices["Galaxy Tab S4"] } },
   ],
   webServer: [
     {

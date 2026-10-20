@@ -415,6 +415,51 @@ export const Reader = () => {
   });
   const percent = total > 1 ? Math.round((page / (total - 1)) * 100) : 100;
 
+  const tools = (
+    <div className="readerTools">
+      <button
+        className="flat"
+        title={t("fontSmaller")}
+        disabled={font <= FONTS[0]}
+        onClick={() => pick(FONTS[FONTS.indexOf(font) - 1] ?? FONTS[0])}
+      >
+        A−
+      </button>
+      <button
+        className="flat"
+        title={t("fontBigger")}
+        disabled={font >= FONTS[FONTS.length - 1]}
+        onClick={() =>
+          pick(FONTS[FONTS.indexOf(font) + 1] ?? FONTS[FONTS.length - 1])
+        }
+      >
+        A+
+      </button>
+      {THEMES.map((name) => (
+        <button
+          key={name}
+          className={`swatch ${name} ${theme === name ? "active" : ""}`}
+          title={t(`theme${name[0].toUpperCase()}${name.slice(1)}`)}
+          aria-pressed={theme === name}
+          onClick={() => paint(name)}
+        />
+      ))}
+      {book.chapters?.some((c) => c.html.includes('src="img/')) && (
+        <button
+          className={`flat ${pics ? "active" : ""}`}
+          title={t(pics ? "picsOff" : "picsOn")}
+          aria-pressed={pics}
+          onClick={() => {
+            localStorage.setItem("readerPics", pics ? "off" : "on");
+            setPics(!pics);
+          }}
+        >
+          ▦
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className={`reader ${theme} ${bars ? "" : "bare"}`}>
       <header className="readerBar">
@@ -429,55 +474,14 @@ export const Reader = () => {
           <b>{book.title}</b>
           <span>{book.chapters[chapter]?.title || book.author}</span>
         </div>
-        <div className="readerTools">
-          <button
-            className="flat"
-            title={t("fontSmaller")}
-            disabled={font <= FONTS[0]}
-            onClick={() => pick(FONTS[FONTS.indexOf(font) - 1] ?? FONTS[0])}
-          >
-            A−
-          </button>
-          <button
-            className="flat"
-            title={t("fontBigger")}
-            disabled={font >= FONTS[FONTS.length - 1]}
-            onClick={() =>
-              pick(FONTS[FONTS.indexOf(font) + 1] ?? FONTS[FONTS.length - 1])
-            }
-          >
-            A+
-          </button>
-          {THEMES.map((name) => (
-            <button
-              key={name}
-              className={`swatch ${name} ${theme === name ? "active" : ""}`}
-              title={t(`theme${name[0].toUpperCase()}${name.slice(1)}`)}
-              aria-pressed={theme === name}
-              onClick={() => paint(name)}
-            />
-          ))}
-          {book.chapters?.some((c) => c.html.includes('src="img/')) && (
-            <button
-              className={`flat ${pics ? "active" : ""}`}
-              title={t(pics ? "picsOff" : "picsOn")}
-              aria-pressed={pics}
-              onClick={() => {
-                localStorage.setItem("readerPics", pics ? "off" : "on");
-                setPics(!pics);
-              }}
-            >
-              ▦
-            </button>
-          )}
-          <button
-            className={`flat ${toc ? "active" : ""}`}
-            title={t("contents")}
-            onClick={() => setToc(!toc)}
-          >
-            ☰
-          </button>
-        </div>
+        {!TOUCH && tools}
+        <button
+          className={`flat ${toc ? "active" : ""}`}
+          title={t("contents")}
+          onClick={() => setToc(!toc)}
+        >
+          ☰
+        </button>
       </header>
 
       <div className="readerBody">
@@ -525,6 +529,9 @@ export const Reader = () => {
         </button>
 
         {toc && (
+          <div className="readerTocShade" onClick={() => setToc(false)} />
+        )}
+        {toc && (
           <nav className="readerToc" aria-label={t("contents")}>
             <header>
               <b>{t("contents")}</b>
@@ -548,7 +555,8 @@ export const Reader = () => {
                       if (TOUCH) setBars(false);
                     }}
                   >
-                    {c.title || t("part", i + 1)}
+                    <span>{c.title || t("part", i + 1)}</span>
+                    <small>{(starts.current[i] ?? 0) + 1}</small>
                   </button>
                 </li>
               ))}
@@ -621,6 +629,7 @@ export const Reader = () => {
         <span>
           {page + 1} / {total} · {percent}%
         </span>
+        {TOUCH && tools}
       </footer>
     </div>
   );

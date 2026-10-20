@@ -35,6 +35,8 @@ pub struct Book {
     created_at: DateTime<Utc>,
     /// книга лежит на полке у того, кто спрашивает («мои книги»)
     on_shelf: bool,
+    read_at: Option<DateTime<Utc>>,
+    read_pos: Option<String>,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -53,11 +55,12 @@ pub const BOOK_EXTS: [&str; 9] = [
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
-     (s.user_id is not null) as on_shelf";
+     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
 const BOOK_FROM: &str = "from books b
      left join users u on u.id = b.owner_id
-     left join shelf s on s.book_id = b.id and s.user_id = $1";
+     left join shelf s on s.book_id = b.id and s.user_id = $1
+     left join reading_progress p on p.book_id = b.id and p.user_id = $1";
 
 /// Название, автор и серия одной строкой: искать надо по всем трём сразу,
 /// а слово из запроса может лежать в любом.
@@ -131,6 +134,12 @@ impl Book {
             // rfc3339, чтобы фронт отформатировал под локаль читателя сам
             "addedAt": self.created_at.to_rfc3339(),
             "mine": self.on_shelf,
+            "readAt": self.read_at.map(|t| t.to_rfc3339()),
+            "progress": self
+                .read_pos
+                .as_deref()
+                .and_then(|p| p.parse::<f64>().ok())
+                .filter(|p| (0.0..=1.0).contains(p)),
             "canDelete": owner || user.admin,
         })
     }
@@ -240,8 +249,7 @@ pub async fn books_in_read(
 ) -> Result<Json<Vec<serde_json::Value>>> {
     let books: Vec<Book> = sqlx::query_as(&format!(
         "select {BOOK_COLS} {BOOK_FROM}
-         join reading_progress p on p.book_id = b.id
-         where p.user_id = $1 order by p.updated_at desc"
+         where p.updated_at is not null order by p.updated_at desc"
     ))
     .bind(user.id)
     .fetch_all(&state.db)
@@ -301,7 +309,7 @@ pub async fn download_one(
 /// которое меняет результат: все документы в `book_docs` с меньшей версией
 /// пересоберутся при первом открытии, а браузеры, у которых книга лежит
 /// в кэше, получат новую по ETag.
-pub const DOC_VERSION: i32 = 5;
+pub const DOC_VERSION: i32 = 6;
 
 fn doc_etag(id: Uuid, title: &str, author: &str) -> String {
     let head = sha2::Sha256::digest(format!("{title}\n{author}"));
@@ -1071,6 +1079,8 @@ mod tests {
             created_at: Utc::now(),
             source_url: None,
             on_shelf,
+            read_at: None,
+            read_pos: None,
         };
         let user = |admin| AuthUser { id: me, admin };
 

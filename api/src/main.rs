@@ -16,6 +16,7 @@ mod images;
 mod me;
 mod mobi;
 mod parse;
+mod pdf;
 mod rda;
 mod reader;
 mod search;

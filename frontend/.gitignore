@@ -27,3 +27,5 @@ e2e/.auth.json
 e2e/.book.json
 test-results/
 playwright-report/
+e2e/.older.json
+e2e/.empty.json

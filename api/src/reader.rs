@@ -1405,7 +1405,7 @@ fn markdown(bytes: &[u8]) -> Result<Vec<Chapter>> {
 fn pdf(bytes: &[u8]) -> Result<Vec<Chapter>> {
     // Разбор шрифтов идёт по чужому файлу и на битом может паниковать;
     // здесь это ошибка формата (400), а не падение задачи (500).
-    let text = std::panic::catch_unwind(|| pdf_extract::extract_text_from_mem(bytes))
+    let pages = std::panic::catch_unwind(|| crate::pdf::glyphs(bytes))
         .map_err(|_| AppError::bad("Файл pdf повреждён", "Broken pdf"))?
         .map_err(|e| {
             AppError::bad(
@@ -1413,7 +1413,18 @@ fn pdf(bytes: &[u8]) -> Result<Vec<Chapter>> {
                 format!("Broken pdf: {e}"),
             )
         })?;
-    Ok(split_headings(plain(&text, true)))
+    let mut out = Out::default();
+    for block in crate::pdf::blocks(&pages) {
+        let (tag, text) = match &block {
+            crate::pdf::Block::Heading(2, text) => ("h2", text),
+            crate::pdf::Block::Heading(_, text) => ("h3", text),
+            crate::pdf::Block::Para(text) => ("p", text),
+        };
+        out.open(tag, "");
+        out.text(text);
+        out.close(tag);
+    }
+    Ok(split_headings(out.buf))
 }
 
 #[cfg(test)]
