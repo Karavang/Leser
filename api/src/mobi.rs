@@ -442,7 +442,7 @@ pub fn meta(bytes: &[u8]) -> Result<Meta> {
         // Название лежит отдельно от EXTH, собственным куском нулевой записи.
         title: r0
             .get(h.name.0..h.name.0 + h.name.1)
-            .map(&text)
+            .map(text)
             .unwrap_or_default(),
         ..Meta::default()
     };
