@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   // Фронт зовёт /api/* — тот же origin, поэтому CORS не участвует.
-  // В dev проксирует vite, в контейнере nginx, на проде — nginx на leser.cloud.
+  // В dev проксирует vite, в контейнере nginx, на проде — nginx на leser.karavang.com.
   server: {
     proxy: {
       "/api": {

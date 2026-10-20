@@ -84,13 +84,12 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
       return patch(item.id, { state: "fail", message: t("tooBig", MAX_MB) });
     }
 
-    patch(item.id, { state: "send", percent: 0 });
+    patch(item.id, { state: "send", percent: 0, force, editError: null });
     const form = new FormData();
     form.append("file", item.file);
     try {
       const { data } = await axios.post(`/api/putNewOne${force ? "?force=true" : ""}`, form, {
-        // Content-Type ставит браузер: только он знает границу частей.
-        headers: { Authorization: `Bearer ${user.token}` },
+        ...auth,
         onUploadProgress: (e) =>
           e.total &&
           patch(item.id, { percent: Math.round((e.loaded / e.total) * 100) }),
@@ -117,6 +116,7 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
   };
 
   const edit = async (item, form) => {
+    patch(item.id, { busy: true, editError: null });
     try {
       const { data } = await axios.post(
         `/api/editBook/${item.book.id}`,
@@ -127,20 +127,27 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
         },
         auth,
       );
-      patch(item.id, { state: "done", book: data });
+      patch(item.id, { state: "done", book: data, busy: false });
       onAdded?.();
     } catch (error) {
-      patch(item.id, { editError: error.response?.data?.message ?? t("saveFailed") });
+      patch(item.id, {
+        busy: false,
+        editError: error.response?.data?.message ?? t("saveFailed"),
+      });
     }
   };
 
   const remove = async (item) => {
+    patch(item.id, { busy: true, editError: null });
     try {
       await axios.delete(`/api/deleteOne/${item.book.id}`, auth);
-      patch(item.id, { state: "removed" });
+      patch(item.id, { state: "removed", busy: false });
       onAdded?.();
     } catch (error) {
-      patch(item.id, { editError: error.response?.data?.message ?? t("deleteFailed") });
+      patch(item.id, {
+        busy: false,
+        editError: error.response?.data?.message ?? t("deleteFailed"),
+      });
     }
   };
 
@@ -234,7 +241,7 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
                   <span className="uploadState">{STATE[item.state](item)}</span>
                 )}
                 {item.state === "fail" && (
-                  <button type="button" className="uploadAct" onClick={() => send(item)}>
+                  <button type="button" className="uploadAct" onClick={() => send(item, item.force)}>
                     {t("retry")}
                   </button>
                 )}
@@ -247,17 +254,17 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
                   <div className="uploadCheck">
                     <BookLine book={item.book} />
                     <p>{t("isRight")}</p>
-                    <div className="uploadActs">
+                    <fieldset className="uploadActs" disabled={item.busy}>
                       <button type="button" onClick={() => patch(item.id, { state: "done" })}>
                         {t("looksRight")}
                       </button>
-                      <button type="button" onClick={() => patch(item.id, { state: "edit" })}>
+                      <button type="button" onClick={() => patch(item.id, { state: "edit", editError: null })}>
                         {t("fixMeta")}
                       </button>
                       <button type="button" className="danger" onClick={() => remove(item)}>
                         {t("removeUpload")}
                       </button>
-                    </div>
+                    </fieldset>
                     {item.editError && <p className="uploadError">{item.editError}</p>}
                   </div>
                 )}
@@ -281,12 +288,12 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
                       {t("series")}
                       <input name="series" defaultValue={item.book.series ?? ""} />
                     </label>
-                    <div className="uploadActs">
+                    <fieldset className="uploadActs" disabled={item.busy}>
                       <button type="submit">{t("saveMeta")}</button>
-                      <button type="button" onClick={() => patch(item.id, { state: "check" })}>
+                      <button type="button" onClick={() => patch(item.id, { state: "check", editError: null })}>
                         {t("cancel")}
                       </button>
-                    </div>
+                    </fieldset>
                     {item.editError && <p className="uploadError">{item.editError}</p>}
                   </form>
                 )}
@@ -294,14 +301,14 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
                   <div className="uploadCheck">
                     <p>{t("similarHere")}</p>
                     <BookLine book={item.book} />
-                    <div className="uploadActs">
+                    <fieldset className="uploadActs" disabled={item.busy}>
                       <button type="button" onClick={() => send(item, true)}>
                         {t("addAnyway")}
                       </button>
                       <button type="button" onClick={() => patch(item.id, { state: "skipped" })}>
                         {t("skip")}
                       </button>
-                    </div>
+                    </fieldset>
                   </div>
                 )}
               </li>

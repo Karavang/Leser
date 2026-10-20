@@ -944,6 +944,10 @@ li {
   }
 
   .uploadActs {
+    margin: 0;
+    padding: 0;
+    border: none;
+    min-width: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -960,14 +964,18 @@ li {
     color: var(--ink);
     cursor: pointer;
 
-    &:hover {
+    &:hover:enabled {
       background: var(--back-orange);
+    }
+    &:disabled {
+      opacity: 0.5;
+      cursor: progress;
     }
     &.danger {
       border-color: var(--danger);
       color: var(--danger);
     }
-    &.danger:hover {
+    &.danger:hover:enabled {
       background: var(--danger);
       color: #fff;
     }

@@ -222,7 +222,7 @@ apt install nginx certbot python3-certbot-nginx
 cp deploy/nginx.prod.conf /etc/nginx/sites-available/leser   # поправить server_name
 ln -s /etc/nginx/sites-available/leser /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
-certbot --nginx -d leser.cloud -d www.leser.cloud
+certbot --nginx -d leser.karavang.com
 ```
 
 `restart: unless-stopped` поднимает контейнеры после перезагрузки сервера.

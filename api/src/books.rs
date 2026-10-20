@@ -303,8 +303,10 @@ pub async fn download_one(
 /// в кэше, получат новую по ETag.
 pub const DOC_VERSION: i32 = 4;
 
-fn doc_etag(id: Uuid) -> String {
-    format!("\"v{DOC_VERSION}-{id}\"")
+fn doc_etag(id: Uuid, title: &str, author: &str) -> String {
+    let head = sha2::Sha256::digest(format!("{title}\n{author}"));
+    let head: String = head[..4].iter().map(|b| format!("{b:02x}")).collect();
+    format!("\"v{DOC_VERSION}-{id}-{head}\"")
 }
 
 async fn reader_doc(
@@ -355,7 +357,14 @@ pub async fn read_one(
     // меняется только вместе с версией парсера — она и есть ETag. Совпал —
     // до базы не доходим и тело не шлём. Раньше тут стоял `immutable` на год,
     // и поумневший парсер до читателя не доезжал: браузер не спрашивал.
-    let etag = doc_etag(id);
+    let head: Option<(String, String)> =
+        sqlx::query_as("select title, author from books where id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
+    let (title, author) =
+        head.ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found"))?;
+    let etag = doc_etag(id, &title, &author);
     if headers
         .get(header::IF_NONE_MATCH)
         .is_some_and(|v| v.as_bytes() == etag.as_bytes())
@@ -559,12 +568,12 @@ async fn store_book(
     }
 
     let hash = sha2::Sha256::digest(&bytes).to_vec();
-    let same: Option<(Uuid,)> =
+    let stored_copy: Option<(Uuid,)> =
         sqlx::query_as("select book_id from book_files where sha256 = $1 limit 1")
             .bind(&hash)
             .fetch_optional(&state.db)
             .await?;
-    if let Some((id,)) = same {
+    if let Some((id,)) = stored_copy {
         sqlx::query(
             "insert into shelf (user_id, book_id) values ($1, $2)
              on conflict (user_id, book_id) do nothing",
@@ -575,11 +584,6 @@ async fn store_book(
         .await?;
         return Ok(Stored::Same(id));
     }
-    if !force {
-        if let Some(id) = similar_book(&state.db, &meta.title, &meta.author).await? {
-            return Ok(Stored::Similar(id));
-        }
-    }
 
     // Книга разбирается для читалки здесь же, один раз на всю жизнь книги.
     // Заодно это и проверка: то, из чего не достать ни строчки текста, читать
@@ -587,6 +591,12 @@ async fn store_book(
     // в библиотеке книгу, которая не открывается.
     let doc = reader_doc(ext, bytes.clone(), &meta.title, &meta.author, &meta.lang).await?;
     let (doc, imgs) = crate::images::extract(doc);
+
+    if !force {
+        if let Some(id) = similar_book(&state.db, &meta.title, &meta.author).await? {
+            return Ok(Stored::Similar(id));
+        }
+    }
 
     // Метаданные, файл и разбор — одной транзакцией. Строки без файла (сломала бы
     // читалку) и файла без строки (мусор) не бывает по построению — с S3 это
@@ -770,13 +780,17 @@ pub async fn edit_one(
     .execute(&mut *tx)
     .await?;
     if edited.rows_affected() == 0 {
-        return Err(AppError::new(
-            StatusCode::FORBIDDEN,
-            "Это не ваша книга",
-            "Not your book",
-        ));
+        let exists: Option<(Uuid,)> = sqlx::query_as("select id from books where id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        return Err(match exists {
+            Some(_) => AppError::new(StatusCode::FORBIDDEN, "Это не ваша книга", "Not your book"),
+            None => AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found"),
+        });
     }
-    // ponytail: the parsed doc carries the old title in its head; version 0 makes /read rebuild it once.
+    // ponytail: the parsed doc carries the old title in its head; version 0 makes /read rebuild it once,
+    // and the ETag hashes title and author, so cached copies are refetched.
     sqlx::query("update book_docs set version = 0 where book_id = $1")
         .bind(id)
         .execute(&mut *tx)
@@ -1081,6 +1095,40 @@ mod tests {
         assert_eq!(orphan.to_json(&user(false))["canDelete"], false);
         assert_eq!(orphan.to_json(&user(true))["canDelete"], true);
         assert!(orphan.to_json(&user(false))["addedBy"].is_null());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DATABASE_URL pointing at a throwaway Postgres"]
+    async fn similar_books_match_on_title_and_author() {
+        let db = PgPool::connect(&std::env::var("DATABASE_URL").unwrap())
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&db).await.unwrap();
+        let (id,): (Uuid,) = sqlx::query_as(
+            "insert into books (title, author, ext) values ($1, $2, 'epub') returning id",
+        )
+        .bind("Важные годы. Почему не стоит откладывать жизнь на потом")
+        .bind("Мэг Джей")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+
+        let similar = |title: &'static str, author: &'static str| {
+            let db = db.clone();
+            async move { similar_book(&db, title, author).await.unwrap() }
+        };
+        let brackets = "Важные годы [Почему не стоит откладывать жизнь на потом]";
+        assert_eq!(similar(brackets, "Мэг Джей").await, Some(id));
+        assert_eq!(similar(brackets, "").await, Some(id));
+        assert_eq!(similar(brackets, "Джей Мэг").await, Some(id));
+        assert_eq!(similar("Час презрения", "Мэг Джей").await, None);
+        assert_eq!(similar(brackets, "Анджей Сапковский").await, None);
+
+        sqlx::query("delete from books where id = $1")
+            .bind(id)
+            .execute(&db)
+            .await
+            .unwrap();
     }
 
     #[test]

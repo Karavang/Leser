@@ -33,7 +33,7 @@ pub fn host_allowed(url: &reqwest::Url) -> bool {
 pub fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(TIMEOUT)
-        .user_agent("leser/0.1 (+https://leser.cloud)")
+        .user_agent("leser/0.1 (+https://leser.karavang.com)")
         // Редирект — это ещё один запрос, и увести он может куда угодно:
         // gutenberg.org сам редиректит, поэтому запрещать их нельзя, а
         // проверять каждый переход — нужно.
