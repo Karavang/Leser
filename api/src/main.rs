@@ -22,8 +22,11 @@ mod search;
 mod sources;
 mod tts;
 
-/// Потолок на размер книги. epub/fb2 в этом умещаются с большим запасом.
-const MAX_UPLOAD: usize = 256 * 1024 * 1024;
+// ponytail: Cloudflare rejects request bodies over 100 MB on the free plan, so file uploads cap at 90 MiB.
+// To go higher, raise MAX_UPLOAD_MB together with client_max_body_size in both nginx configs and MAX_MB in ModalAdd.jsx.
+pub const MAX_UPLOAD_MB: usize = 90;
+pub const MAX_UPLOAD: usize = MAX_UPLOAD_MB * 1024 * 1024;
+pub const MAX_IMPORT_MB: usize = 256;
 
 pub struct AppState {
     pub db: sqlx::PgPool,
@@ -219,7 +222,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         // с дефолтными 2 МБ, чтобы их нельзя было завалить телом на 64 МБ.
         .route(
             "/putNewOne",
-            post(books::put_new_one).layer(DefaultBodyLimit::max(MAX_UPLOAD)),
+            post(books::put_new_one).layer(DefaultBodyLimit::max(MAX_UPLOAD + 1024 * 1024)),
         )
         .route("/pageWasFlipped", post(books::page_was_flipped))
         .route(

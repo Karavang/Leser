@@ -15,7 +15,7 @@ use sqlx::{
 };
 use uuid::Uuid;
 
-use crate::{auth::AuthUser, AppError, AppState, Result, MAX_UPLOAD};
+use crate::{auth::AuthUser, AppError, AppState, Result, MAX_IMPORT_MB, MAX_UPLOAD, MAX_UPLOAD_MB};
 
 #[derive(sqlx::FromRow)]
 pub struct Book {
@@ -704,6 +704,9 @@ pub async fn put_new_one(
     }
     let (name, bytes) =
         file.ok_or_else(|| AppError::bad("Файл не приложен", "No file uploaded"))?;
+    if bytes.len() > MAX_UPLOAD {
+        return Err(too_big(MAX_UPLOAD_MB));
+    }
     let ext = book_ext(&name)?;
 
     let (code, duplicate, id) =
@@ -718,6 +721,14 @@ pub async fn put_new_one(
         Json(serde_json::json!({ "book": book, "duplicate": duplicate })),
     )
         .into_response())
+}
+
+fn too_big(mb: usize) -> AppError {
+    AppError::new(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        format!("Книга больше {mb} МБ"),
+        format!("The book is over {mb} MB"),
+    )
 }
 
 #[derive(Deserialize)]
@@ -849,12 +860,9 @@ pub async fn import(
     // Заявленной длине не верим — проверяем и её, и то, что пришло на самом деле.
     if response
         .content_length()
-        .is_some_and(|n| n > MAX_UPLOAD as u64)
+        .is_some_and(|n| n > (MAX_IMPORT_MB * 1024 * 1024) as u64)
     {
-        return Err(AppError::bad(
-            "Книга больше 256 МБ",
-            "The book is over 256 MB",
-        ));
+        return Err(too_big(MAX_IMPORT_MB));
     }
     let bytes = response.bytes().await.map_err(|e| {
         AppError::bad(
@@ -862,11 +870,8 @@ pub async fn import(
             format!("Download failed: {e}"),
         )
     })?;
-    if bytes.len() > MAX_UPLOAD {
-        return Err(AppError::bad(
-            "Книга больше 256 МБ",
-            "The book is over 256 MB",
-        ));
+    if bytes.len() > MAX_IMPORT_MB * 1024 * 1024 {
+        return Err(too_big(MAX_IMPORT_MB));
     }
 
     let source = body.page_url.as_deref().unwrap_or(&body.url);
