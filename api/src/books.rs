@@ -301,7 +301,7 @@ pub async fn download_one(
 /// которое меняет результат: все документы в `book_docs` с меньшей версией
 /// пересоберутся при первом открытии, а браузеры, у которых книга лежит
 /// в кэше, получат новую по ETag.
-pub const DOC_VERSION: i32 = 4;
+pub const DOC_VERSION: i32 = 5;
 
 fn doc_etag(id: Uuid, title: &str, author: &str) -> String {
     let head = sha2::Sha256::digest(format!("{title}\n{author}"));

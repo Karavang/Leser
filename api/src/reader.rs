@@ -870,6 +870,11 @@ fn resolve(chapter: &Path, href: &str) -> PathBuf {
     path
 }
 
+fn toc_file(content: &Path) -> Option<String> {
+    let name = content.file_name()?.to_string_lossy();
+    Some(name.split('#').next().unwrap_or_default().to_string())
+}
+
 fn epub(bytes: &[u8]) -> Result<Vec<Chapter>> {
     let mut doc = epub::doc::EpubDoc::from_reader(std::io::Cursor::new(bytes)).map_err(|e| {
         AppError::bad(
@@ -883,11 +888,7 @@ fn epub(bytes: &[u8]) -> Result<Vec<Chapter>> {
     let mut toc: HashMap<String, String> = HashMap::new();
     let mut stack: Vec<&epub::doc::NavPoint> = doc.toc.iter().collect();
     while let Some(p) = stack.pop() {
-        if let Some(name) = p
-            .content
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-        {
+        if let Some(name) = toc_file(&p.content) {
             toc.entry(name)
                 .or_insert_with(|| p.label.trim().to_string());
         }
@@ -1691,6 +1692,22 @@ mod tests {
         assert!(from.contains(&format!("<a href=\"#a{top}\">")), "{from}");
         assert!(!from.contains("example.com"), "{from}");
         assert!(from.contains("наружу"), "{from}");
+    }
+
+    #[test]
+    fn toc_entries_with_anchors_still_name_their_file() {
+        assert_eq!(
+            toc_file(Path::new("ch1-4.xhtml#id1")).as_deref(),
+            Some("ch1-4.xhtml")
+        );
+        assert_eq!(
+            toc_file(Path::new("Text/ch2.xhtml")).as_deref(),
+            Some("ch2.xhtml")
+        );
+        assert_eq!(
+            toc_file(Path::new("../Text/ch3.html#top")).as_deref(),
+            Some("ch3.html")
+        );
     }
 
     /// В txt нет ничего, кроме пустых строк, — из них и надо собрать книгу.

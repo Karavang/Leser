@@ -248,6 +248,7 @@ export const Reader = () => {
   /// считаем страницу цели сами. Куда вернуться — помним: сноску читают
   /// и возвращаются в текст.
   const follow = (e) => {
+    if (toc) return setToc(false);
     const link = e.target.closest('a[href^="#"]');
     if (!link) {
       if (String(window.getSelection()).trim()) return;
@@ -495,6 +496,7 @@ export const Reader = () => {
           onMouseUp={grab}
           onTouchStart={(e) => (touch.current = e.changedTouches[0].clientX)}
           onTouchEnd={(e) => {
+            if (toc) return;
             const moved = e.changedTouches[0].clientX - touch.current;
             if (Math.abs(moved) > 40) return go(page + (moved < 0 ? 1 : -1));
             grab();
@@ -523,7 +525,18 @@ export const Reader = () => {
         </button>
 
         {toc && (
-          <nav className="readerToc">
+          <nav className="readerToc" aria-label={t("contents")}>
+            <header>
+              <b>{t("contents")}</b>
+              <button
+                className="tocClose"
+                title={t("close")}
+                aria-label={t("close")}
+                onClick={() => setToc(false)}
+              >
+                ×
+              </button>
+            </header>
             <ol>
               {book.chapters.map((c, i) => (
                 <li key={i}>
@@ -532,6 +545,7 @@ export const Reader = () => {
                     onClick={() => {
                       go(starts.current[i] ?? 0);
                       setToc(false);
+                      if (TOUCH) setBars(false);
                     }}
                   >
                     {c.title || t("part", i + 1)}
