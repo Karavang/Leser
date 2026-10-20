@@ -170,8 +170,24 @@ fn env(key: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| panic!("missing env var {key}"))
 }
 
+fn healthcheck() -> std::io::Result<bool> {
+    use std::io::{Read, Write};
+    let port = std::env::var("PORT").unwrap_or_else(|_| "4444".into());
+    let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+    let mut head = [0u8; 12];
+    stream.read_exact(&mut head)?;
+    Ok(head.ends_with(b" 200"))
+}
+
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        let healthy = matches!(healthcheck(), Ok(true));
+        std::process::exit(i32::from(!healthy));
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
