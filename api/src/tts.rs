@@ -254,4 +254,3 @@ mod tests {
         assert!(pieces("<p> </p><img src=\"img:1\">").is_empty());
     }
 }
-
