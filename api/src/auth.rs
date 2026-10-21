@@ -169,6 +169,7 @@ async fn session_response(
     ))
 }
 
+#[allow(dead_code)]
 pub async fn registration(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RegisterBody>,

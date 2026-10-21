@@ -257,7 +257,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/export", get(me::export))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
-        .route("/registration", post(auth::registration))
+        // ponytail: registration closed for now, uncomment to reopen.
+        // .route("/registration", post(auth::registration))
         .route("/login", post(auth::login))
         .route("/logout", get(auth::logout))
         .route("/account", delete(auth::delete_account))

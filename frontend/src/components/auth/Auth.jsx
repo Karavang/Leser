@@ -115,10 +115,12 @@ const Auth = () => {
             }}
             type={inputType}
           />
+          {/* ponytail: registration closed for now, uncomment to reopen.
           <p>
             {t("noAccount")}{" "}
             <span onClick={() => setIsReg(false)}>{t("goRegister")}</span>
           </p>
+          */}
           <button
             id="loginButton"
             disabled={!isCanLogin}
