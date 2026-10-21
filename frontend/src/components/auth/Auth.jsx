@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { lang, t } from "../../i18n";
+import { forgetDevice } from "../../session";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -37,6 +38,8 @@ const Auth = () => {
         return;
       }
 
+      const before = JSON.parse(localStorage.getItem("user"));
+      if (before && before.email !== data.data.user.email) forgetDevice();
       localStorage.setItem("token", JSON.stringify(data.data.user.token));
       localStorage.setItem("user", JSON.stringify(data.data.user));
       // replace: «назад» с библиотеки не должно возвращать на форму входа

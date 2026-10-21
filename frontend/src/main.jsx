@@ -1,3 +1,8 @@
+import "@fontsource/roboto-mono/400.css";
+import "@fontsource/roboto-mono/400-italic.css";
+import "@fontsource/roboto-mono/500.css";
+import "@fontsource/roboto-mono/600.css";
+import "@fontsource/roboto-mono/700.css";
 import axios from "axios";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -5,7 +10,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { lang } from "./i18n.js";
 import { applyTheme, theme } from "./theme.js";
-import { isOffline, subscribe, tellWorker } from "./offline.js";
+import { canOffline, isOffline, subscribe, tellWorker } from "./offline.js";
 import { sendUnsent } from "./sync.js";
 
 // Язык страницы — не только для порядка: от него зависят переносы, проверка
@@ -21,6 +26,7 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
 }
 tellWorker();
+if (canOffline) navigator.storage?.persist?.();
 sendUnsent();
 window.addEventListener("online", sendUnsent);
 subscribe(() => !isOffline() && sendUnsent());

@@ -9,7 +9,7 @@ import { SourceResults } from "./components/SourceResults";
 import UserButton from "./components/UserButton";
 import UpButton from "./ui/UpButton";
 import { BusyLine, Loading } from "./ui/Loading";
-import { clearSession } from "./session";
+import { expireSession } from "./session";
 import { t } from "./i18n";
 import { downloadedIds, useOffline } from "./offline";
 
@@ -82,7 +82,7 @@ export const Home = () => {
       } catch (error) {
         // токен протух за 30 дней жизни — на вход, а не в пустой экран
         if (error.response?.status === 401) {
-          clearSession();
+          expireSession();
           navigate("/login", { replace: true });
         }
       } finally {

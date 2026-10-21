@@ -53,6 +53,23 @@ const ONE_WORD = /^[\p{L}\p{M}'’-]+$/u;
 /// бесполезна, а весь абзац в неё не влезет.
 const CONTEXT = 120;
 
+const sizes = (chapters) => chapters.map((c) => c.html.length || 1);
+
+const locate = (chapters, frac) => {
+  const len = sizes(chapters);
+  let left = frac * len.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < len.length - 1; i++) {
+    if (left < len[i]) return [i, left / len[i]];
+    left -= len[i];
+  }
+  return [len.length - 1, Math.min(1, left / len[len.length - 1])];
+};
+
+const pageOf = (v, el) => {
+  const left = el.getBoundingClientRect().left - v.getBoundingClientRect().left;
+  return Math.floor((left + v.scrollLeft + 2) / v.clientWidth);
+};
+
 const rememberSpot = (id, frac) => {
   const user = JSON.parse(localStorage.getItem("user"));
   if (!user) return;
@@ -77,8 +94,10 @@ export const Reader = () => {
   const fromQuote = Number.isFinite(openAt) && openAt >= 0 && openAt < 1;
   /// доля книги, на которую надо встать после пересчёта страниц
   const spot = useRef(fromQuote ? openAt : savedSpot(id));
-  /// первая страница каждой главы — для оглавления и подписи в шапке
-  const starts = useRef([]);
+  const inner = useRef(0);
+  const aim = useRef(null);
+  const rate = useRef({ basis: 0, perChar: 0 });
+  const chRef = useRef(0);
   const touch = useRef(0);
   /// листали ли в этот заход — см. сохранение закладки ниже
   const moved = useRef(false);
@@ -89,8 +108,11 @@ export const Reader = () => {
 
   const [book, setBook] = useState(null);
   const [error, setError] = useState(null);
+  const [ch, setCh] = useState(0);
   const [page, setPage] = useState(0);
-  const [total, setTotal] = useState(1);
+  const [laid, setLaid] = useState({ ch: -1, n: 0 });
+  const count = laid.ch === ch ? laid.n : 0;
+  chRef.current = ch;
   const [toc, setToc] = useState(false);
   /// страница, с которой ушли по ссылке, — чтобы вернуться из сноски
   const [back, setBack] = useState(null);
@@ -133,6 +155,9 @@ export const Reader = () => {
         if (!alive) return;
         const at = Number.parseFloat(unsentPage(id) ?? progress?.data?.page);
         if (Number.isFinite(at) && at >= 0 && at < 1) spot.current = at;
+        const [i, within] = locate(read.data.chapters || [], spot.current);
+        aim.current = { inner: within };
+        setCh(i);
         setBook(read.data);
         if (read.data.chapters?.some((c) => c.html.includes('src="img/'))) {
           axios
@@ -153,52 +178,47 @@ export const Reader = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Вся книга одной строкой: колонки должны быть сквозными, иначе главу
-  // не перелистнёшь в следующую, а оглавление станет набором отдельных полос.
+  // ponytail: only the current chapter is in the DOM, old e-ink WebKit chokes on a whole book in one multicol box; a single-chapter book is still laid out whole
   const html = useMemo(() => {
-    const body = (book?.chapters || [])
-      .map((c) => `<section>${c.html}</section>`)
-      .join("");
-    // Картинки иллюстрированной книги сервер оставил ссылками `img/N`:
-    // без токена их не забрать, а выключенными они не нужны вовсе.
-    return body.replace(/src="img\/(\d+)"/g, (whole, n) =>
+    const body = book?.chapters?.[ch]?.html ?? "";
+    return `<section>${body.replace(/src="img\/(\d+)"/g, (whole, n) =>
       pics && imgToken ? `src="/api/img/${id}/${n}?t=${imgToken}"` : "hidden",
-    );
-  }, [book, pics, imgToken, id]);
+    )}</section>`;
+  }, [book, ch, pics, imgToken, id]);
 
-  /// Номер страницы, на которую попал элемент. Округлять нельзя, только
-  /// вниз: на широком экране страница — это разворот из двух колонок, и то,
-  /// что лежит в правой, по округлению уехало бы на страницу вперёд.
-  /// Пара пикселей запаса — на дробные размеры колонок.
-  const pageOf = (el) => {
-    const v = view.current;
-    const left =
-      el.getBoundingClientRect().left - v.getBoundingClientRect().left;
-    return Math.floor((left + v.scrollLeft + 2) / v.clientWidth);
-  };
+  const len = useMemo(() => sizes(book?.chapters || []), [book]);
+  const cum = useMemo(
+    () => len.reduce((acc, n) => [...acc, acc[acc.length - 1] + n], [0]),
+    [len],
+  );
+  const last = len.length - 1;
+  const bookLen = cum[cum.length - 1] || 1;
 
-  /// Пересчёт страниц. Нужен после загрузки книги и после любого изменения
-  /// размера — шрифта или самого окна.
   const measure = useCallback(() => {
     const v = view.current;
     if (!v || !v.clientWidth) return;
     const step = v.clientWidth;
-
-    const box = v.getBoundingClientRect();
-    starts.current = [...v.querySelectorAll("section")].map((s) =>
-      Math.floor(
-        (s.getBoundingClientRect().left - box.left + v.scrollLeft + 2) / step,
-      ),
-    );
-
-    const count = Math.max(1, Math.round(v.scrollWidth / step));
-    const at = Math.min(count - 1, Math.round(spot.current * count));
-    setTotal(count);
+    const n = Math.max(1, Math.round(v.scrollWidth / step));
+    if (rate.current.step !== step) rate.current = { basis: 0, perChar: 0, step };
+    const want = aim.current;
+    aim.current = null;
+    let at;
+    if (want?.id) {
+      const el = v.querySelector(`[id="${CSS.escape(want.id)}"]`);
+      at = el ? pageOf(v, el) : 0;
+    } else if (want?.end) at = n - 1;
+    else at = Math.round((want ? want.inner : inner.current) * n);
+    at = Math.max(0, Math.min(n - 1, at));
+    setLaid({ ch: chRef.current, n });
     setPage(at);
+    inner.current = at / n;
     v.scrollLeft = at * step;
   }, []);
 
-  useLayoutEffect(measure, [html, font, measure]);
+  useLayoutEffect(() => {
+    rate.current = { basis: 0, perChar: 0 };
+  }, [font]);
+  useLayoutEffect(measure, [html, ch, font, measure]);
 
   useEffect(() => {
     const v = view.current;
@@ -238,13 +258,38 @@ export const Reader = () => {
       const v = view.current;
       if (!v) return;
       moved.current = true;
-      const at = Math.max(0, Math.min(total - 1, to));
+      if (to < 0 && ch > 0) {
+        aim.current = { end: true };
+        return setCh(ch - 1);
+      }
+      if (to >= count && ch < last) {
+        aim.current = { inner: 0 };
+        return setCh(ch + 1);
+      }
+      const at = Math.max(0, Math.min(count - 1, to));
       v.scrollLeft = at * v.clientWidth;
       setPage(at);
-      spot.current = at / total;
+      inner.current = at / count;
     },
-    [total],
+    [ch, count, last],
   );
+
+  const jump = (i, want) => {
+    moved.current = true;
+    aim.current = want;
+    if (i === ch) measure();
+    else setCh(i);
+  };
+
+  // ponytail: page totals are estimated from the longest chapter laid out so far; they settle as the reader moves through the book
+  if (count && len[ch] >= rate.current.basis) {
+    rate.current = { ...rate.current, basis: len[ch], perChar: count / len[ch] };
+  }
+  const perChar = rate.current.perChar;
+  const startOf = (i) => Math.round(cum[i] * perChar);
+  const here = startOf(ch) + page;
+  const total = Math.max(startOf(ch) + count, Math.round(bookLen * perChar), 1);
+  const frac = count ? (cum[ch] + (page / count) * len[ch]) / bookLen : 0;
 
   const close = () =>
     location.key === "default" ? navigate("/", { replace: true }) : navigate(-1);
@@ -268,12 +313,13 @@ export const Reader = () => {
       return;
     }
     e.preventDefault();
-    const target = view.current?.querySelector(
-      `[id="${CSS.escape(link.getAttribute("href").slice(1))}"]`,
-    );
-    if (!target) return;
-    setBack(page);
-    go(pageOf(target));
+    const target = link.getAttribute("href").slice(1);
+    const i = view.current.querySelector(`[id="${CSS.escape(target)}"]`)
+      ? ch
+      : book.chapters.findIndex((c) => c.html.includes(`id="${target}"`));
+    if (i < 0) return;
+    setBack({ ch, inner: page / count, at: here });
+    jump(i, { id: target });
   };
 
   useEffect(() => {
@@ -283,14 +329,14 @@ export const Reader = () => {
         e.preventDefault();
         go(page + 1);
       } else if (["ArrowLeft", "PageUp"].includes(e.key)) go(page - 1);
-      else if (e.key === "Home") go(0);
-      else if (e.key === "End") go(total - 1);
+      else if (e.key === "Home") jump(0, { inner: 0 });
+      else if (e.key === "End") jump(last, { end: true });
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // close меняется каждый рендер, но делает всегда одно и то же
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [go, page, total, toc]);
+  }, [go, page, last, toc]);
 
   // Перелистывание двумя пальцами по тачпаду. Нативно прокрутить читалку
   // нельзя — у неё overflow: hidden, — поэтому горизонтальное колесо сами
@@ -336,16 +382,15 @@ export const Reader = () => {
   // будет запрос, а листают подряд. У себя запоминаем сразу — иначе выход
   // из книги в первую же секунду терял бы страницу.
   useEffect(() => {
-    if (!book || total <= 1) return;
+    if (!book || !count) return;
     // Пришли из цитаты и ещё не листали — это заглянуть, а не читать.
     // Перебивать закладку, на которой человек остановился, за такое нельзя.
     if (fromQuote && !moved.current) return;
-    const frac = page / total;
     rememberSpot(id, frac);
     const timer = setTimeout(() => sendPage(id, String(frac)), 800);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, total, book, id]);
+  }, [frac, book, id]);
 
   /// Что выделили. Выделение уже сделал браузер — нам остаётся забрать текст
   /// и фразу вокруг него: сохранять слово без примера бессмысленно.
@@ -407,11 +452,7 @@ export const Reader = () => {
     );
   if (!book) return <LoadingBook theme={theme} />;
 
-  let chapter = 0;
-  starts.current.forEach((at, i) => {
-    if (at <= page) chapter = i;
-  });
-  const percent = total > 1 ? Math.round((page / (total - 1)) * 100) : 100;
+  const percent = Math.round(frac * 100);
 
   const tools = (
     <div className="readerTools">
@@ -470,7 +511,7 @@ export const Reader = () => {
         </button>
         <div className="readerWhat">
           <b>{book.title}</b>
-          <span>{book.chapters[chapter]?.title || book.author}</span>
+          <span>{book.chapters[ch]?.title || book.author}</span>
         </div>
         {!TOUCH && tools}
         <button
@@ -486,7 +527,7 @@ export const Reader = () => {
         <button
           className="flip left"
           title={t("prevPage")}
-          disabled={page === 0}
+          disabled={ch === 0 && page === 0}
           onClick={() => go(page - 1)}
         >
           ‹
@@ -520,7 +561,7 @@ export const Reader = () => {
         <button
           className="flip right"
           title={t("nextPage")}
-          disabled={page >= total - 1}
+          disabled={ch === last && page >= count - 1}
           onClick={() => go(page + 1)}
         >
           ›
@@ -546,15 +587,15 @@ export const Reader = () => {
               {book.chapters.map((c, i) => (
                 <li key={i}>
                   <button
-                    className={i === chapter ? "active" : ""}
+                    className={i === ch ? "active" : ""}
                     onClick={() => {
-                      go(starts.current[i] ?? 0);
+                      jump(i, { inner: 0 });
                       setToc(false);
                       if (TOUCH) setBars(false);
                     }}
                   >
                     <span>{c.title || t("part", i + 1)}</span>
-                    <small>{(starts.current[i] ?? 0) + 1}</small>
+                    <small>{startOf(i) + 1}</small>
                   </button>
                 </li>
               ))}
@@ -571,7 +612,7 @@ export const Reader = () => {
               onClick={() =>
                 keep(
                   "/api/quotes",
-                  { text: sel.text, position: String(page / total) },
+                  { text: sel.text, position: String(frac) },
                   t("quoteSaved"),
                 )
               }
@@ -602,15 +643,15 @@ export const Reader = () => {
         )}
         {said && <div className="readerSaid">{said}</div>}
 
-        {back !== null && back !== page && (
+        {back !== null && back.at !== here && (
           <button
             className="readerBack"
             onClick={() => {
-              go(back);
+              jump(back.ch, { inner: back.inner });
               setBack(null);
             }}
           >
-            {t("backToPage", back + 1)}
+            {t("backToPage", back.at + 1)}
           </button>
         )}
       </div>
@@ -620,12 +661,17 @@ export const Reader = () => {
           type="range"
           min={0}
           max={Math.max(0, total - 1)}
-          value={page}
+          value={here}
           aria-label={t("position")}
-          onChange={(e) => go(Number(e.target.value))}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (n >= startOf(ch) && n < startOf(ch) + count) return go(n - startOf(ch));
+            const [i, within] = locate(book.chapters, n / total);
+            jump(i, { inner: within });
+          }}
         />
         <span>
-          {page + 1} / {total} · {percent}%
+          {here + 1} / {total} · {percent}%
         </span>
         {TOUCH && tools}
       </footer>

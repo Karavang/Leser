@@ -20,6 +20,9 @@ export const RU = {
   downloading: "Скачиваю…",
   downloaded: "Скачана",
   downloadFailed: "Не удалось скачать",
+  downloads: "Скачанные книги",
+  noDownloads: "Скачанных книг нет",
+  mb: "МБ",
 
   // библиотека
   tabLibrary: "Библиотека",
@@ -183,6 +186,9 @@ export const EN = {
   downloading: "Downloading…",
   downloaded: "Downloaded",
   downloadFailed: "Download failed",
+  downloads: "Downloaded books",
+  noDownloads: "No downloaded books",
+  mb: "MB",
 
   tabLibrary: "Library",
   tabMine: "My books",
@@ -337,6 +343,9 @@ export const UK = {
   downloading: "Завантажую…",
   downloaded: "Завантажено",
   downloadFailed: "Не вдалося завантажити",
+  downloads: "Завантажені книги",
+  noDownloads: "Завантажених книг немає",
+  mb: "МБ",
 
   tabLibrary: "Бібліотека",
   tabMine: "Мої книжки",
@@ -490,6 +499,9 @@ export const PL = {
   downloading: "Pobieram…",
   downloaded: "Pobrana",
   downloadFailed: "Nie udało się pobrać",
+  downloads: "Pobrane książki",
+  noDownloads: "Brak pobranych książek",
+  mb: "MB",
 
   tabLibrary: "Biblioteka",
   tabMine: "Moje książki",
@@ -643,6 +655,9 @@ export const DE = {
   downloading: "Lade herunter…",
   downloaded: "Heruntergeladen",
   downloadFailed: "Download fehlgeschlagen",
+  downloads: "Heruntergeladene Bücher",
+  noDownloads: "Keine heruntergeladenen Bücher",
+  mb: "MB",
 
   tabLibrary: "Bibliothek",
   tabMine: "Meine Bücher",

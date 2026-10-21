@@ -6,6 +6,7 @@ import LogoutButton from "./LogoutButton";
 import { AdminPanel } from "./AdminPanel";
 import { LANGS, lang, setLang, t } from "../i18n";
 import { applyTheme, theme as saved, THEMES } from "../theme";
+import { canOffline, downloads, forgetDownload } from "../offline";
 
 /// Сколько дней показывает график. Месяц — это ещё видно на телефоне
 /// и уже достаточно, чтобы отличить «читаю» от «читал когда-то».
@@ -34,6 +35,16 @@ const UserPage = () => {
   const [stats, setStats] = useState(null);
   const [theme, setTheme] = useState(saved);
   const [error, setError] = useState(null);
+  const [stored, setStored] = useState([]);
+
+  useEffect(() => {
+    downloads().then(setStored);
+  }, []);
+
+  const unsave = (id) =>
+    forgetDownload(id).then(() =>
+      setStored((list) => list.filter((b) => b.id !== id)),
+    );
 
   // Кого удалять, сервер берёт из токена — тело запроса не нужно.
   // Закладки уезжают вместе с аккаунтом, загруженные книги остаются в библиотеке.
@@ -230,6 +241,41 @@ const UserPage = () => {
             ))}
           </ul>
         </details>
+
+        {canOffline && (
+          <details className="notes">
+            <summary>
+              {t("downloads")}
+              <span>
+                {stored.length} ·{" "}
+                {(stored.reduce((sum, b) => sum + b.size, 0) / 1048576).toFixed(1)}{" "}
+                {t("mb")}
+              </span>
+            </summary>
+            {stored.length === 0 && <p className="empty">{t("noDownloads")}</p>}
+            <ul className="wordList">
+              {stored.map((b) => (
+                <li key={b.id}>
+                  <b
+                    className="goto"
+                    onClick={() => navigate(`/book/${b.id}`)}
+                  >
+                    {b.title}
+                  </b>
+                  <span>
+                    {b.author} · {(b.size / 1048576).toFixed(1)} {t("mb")}
+                  </span>
+                  <button
+                    title={t("delete")}
+                    onClick={() => unsave(b.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
 
         <AdminPanel auth={auth} />
 

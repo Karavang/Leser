@@ -101,3 +101,37 @@ export const download = async (id) => {
     ),
   );
 };
+
+const bookOf = (request) =>
+  /^\/api\/(?:read|img|imgToken|progress)\/([^/]+)/.exec(new URL(request.url).pathname)?.[1];
+
+// ponytail: sizes come from reading every cached body; keep a size index if the list grows slow
+export const downloads = async () => {
+  if (!window.caches) return [];
+  const cache = await caches.open("api");
+  const have = await downloadedIds();
+  const library = await cache
+    .match("/api/getAll")
+    .then((r) => (r ? r.json() : []))
+    .catch(() => []);
+  const titles = new Map(library.map((book) => [String(book.id), book]));
+  const sizes = new Map();
+  for (const request of await cache.keys()) {
+    const id = bookOf(request);
+    if (!have.has(id)) continue;
+    const body = await (await cache.match(request)).blob();
+    sizes.set(id, (sizes.get(id) || 0) + body.size);
+  }
+  return [...sizes].map(([id, size]) => ({
+    id,
+    size,
+    title: titles.get(id)?.title || id,
+    author: titles.get(id)?.author || "",
+  }));
+};
+
+export const forgetDownload = async (id) => {
+  const cache = await caches.open("api");
+  const keys = await cache.keys();
+  await Promise.all(keys.filter((r) => bookOf(r) === id).map((r) => cache.delete(r)));
+};
