@@ -63,6 +63,14 @@ select,
 textarea {
   color: inherit;
 }
+// ponytail: iOS Safari zooms into any focused field under 16px and never zooms back
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
 ul,
 li {
   margin: 0;
