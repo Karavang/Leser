@@ -6,7 +6,7 @@ import { t } from "../i18n";
 
 const HOVER = matchMedia("(hover: hover)").matches;
 
-export const BooksList = ({ books, onDeleted, onShelf }) => {
+export const BooksList = ({ books, onDeleted, onChange }) => {
   const navigate = useNavigate();
 
   const [isEnter, setEnter] = useState(null);
@@ -43,11 +43,27 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setError(null);
-      onShelf(book.id, mine);
+      onChange(book.id, { mine });
       // подробности открыты по этой же книге — отметку в них тоже поправить
       setDetails((d) => (d && d.id === book.id ? { ...d, mine } : d));
     } catch (e) {
       setError(e.response?.data?.message ?? t("shelfFailed"));
+    }
+  };
+
+  const publish = async (book) => {
+    const open = !book.public;
+    try {
+      await axios.post(
+        `/api/admin/books/${book.id}/public`,
+        { public: open },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      setError(null);
+      onChange(book.id, { public: open });
+      setDetails((d) => (d && d.id === book.id ? { ...d, public: open } : d));
+    } catch (e) {
+      setError(e.response?.data?.message ?? t("publicFailed"));
     }
   };
 
@@ -118,6 +134,7 @@ export const BooksList = ({ books, onDeleted, onShelf }) => {
           onClose={() => setDetails(null)}
           onDelete={remove}
           onShelf={shelve}
+          onPublic={publish}
         />
       )}
     </div>

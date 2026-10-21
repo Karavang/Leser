@@ -166,9 +166,9 @@ export const Home = () => {
 
   // То же с полкой: книга из библиотеки никуда не делась, поменялась только
   // отметка — и в разделе «мои книги» она сама пропадёт из выдачи.
-  const onShelf = useCallback((id, mine) => {
+  const onChange = useCallback((id, fields) => {
     setBooks((bs) =>
-      bs.map((b) => (b.id === id ? { ...b, mine } : b)),
+      bs.map((b) => (b.id === id ? { ...b, ...fields } : b)),
     );
   }, []);
 
@@ -219,7 +219,7 @@ export const Home = () => {
         <BooksList
           books={shownBooks}
           onDeleted={onDeleted}
-          onShelf={onShelf}
+          onChange={onChange}
         />
       )}
       {tab === "library" && (

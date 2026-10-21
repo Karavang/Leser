@@ -37,6 +37,7 @@ pub struct Book {
     on_shelf: bool,
     read_at: Option<DateTime<Utc>>,
     read_pos: Option<String>,
+    public: bool,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -55,12 +56,39 @@ pub const BOOK_EXTS: [&str; 9] = [
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
-     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos";
+     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
 const BOOK_FROM: &str = "from books b
      left join users u on u.id = b.owner_id
      left join shelf s on s.book_id = b.id and s.user_id = $1
      left join reading_progress p on p.book_id = b.id and p.user_id = $1";
+
+/// Who may see book `b`: a reader with the whole library (admin, full), or anyone when the book is public,
+/// or the reader who brought it or holds it on their shelf.
+fn visible_to(viewer: &str) -> String {
+    format!(
+        "(b.public or b.owner_id = {viewer}
+          or exists (select 1 from shelf v where v.user_id = {viewer} and v.book_id = b.id)
+          or exists (select 1 from users r where r.id = {viewer} and r.role <> 'user'))"
+    )
+}
+
+pub async fn ensure_visible(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<()> {
+    if user.full {
+        return Ok(());
+    }
+    let sql = format!(
+        "select 1 from books b where b.id = $2 and {}",
+        visible_to("$1")
+    );
+    sqlx::query(&sql)
+        .bind(user.id)
+        .bind(id)
+        .fetch_optional(db)
+        .await?
+        .map(|_| ())
+        .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found"))
+}
 
 /// Название, автор и серия одной строкой: искать надо по всем трём сразу,
 /// а слово из запроса может лежать в любом.
@@ -141,6 +169,8 @@ impl Book {
                 .and_then(|p| p.parse::<f64>().ok())
                 .filter(|p| (0.0..=1.0).contains(p)),
             "canDelete": owner || user.admin,
+            "public": self.public,
+            "canPublish": user.admin,
         })
     }
 }
@@ -233,7 +263,10 @@ pub async fn get_all(
     // Появится тысяча книг — limit/offset, ?owner=me и trigram-индекс из 0002.
     // sql отдельной переменной: запрос одалживает строку, а временная из
     // format! умерла бы концом этого же выражения.
-    let sql = format!("select {BOOK_COLS} {BOOK_FROM} where ({filter}) order by b.created_at desc");
+    let sql = format!(
+        "select {BOOK_COLS} {BOOK_FROM} where ({filter}) and {} order by b.created_at desc",
+        visible_to("$1")
+    );
     let mut query = sqlx::query_as::<_, Book>(&sql).bind(user.id);
     for words in &q.variants {
         query = query.bind(words);
@@ -249,7 +282,8 @@ pub async fn books_in_read(
 ) -> Result<Json<Vec<serde_json::Value>>> {
     let books: Vec<Book> = sqlx::query_as(&format!(
         "select {BOOK_COLS} {BOOK_FROM}
-         where p.updated_at is not null order by p.updated_at desc"
+         where p.updated_at is not null and {} order by p.updated_at desc",
+        visible_to("$1")
     ))
     .bind(user.id)
     .fetch_all(&state.db)
@@ -260,10 +294,11 @@ pub async fn books_in_read(
 /// Отдаёт сам файл книги: читалка получает байты одним запросом.
 pub async fn download_one(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(filename): Path<String>,
 ) -> Result<impl IntoResponse> {
     let (id, ext) = parse_filename(&filename)?;
+    ensure_visible(&state.db, &user, id).await?;
 
     let row: Option<(Vec<u8>, String, String)> = sqlx::query_as(
         "select f.data, b.ext, b.title from book_files f join books b on b.id = f.book_id
@@ -355,11 +390,12 @@ async fn reader_doc(
 /// уже лежит готовым — сюда он попал при загрузке книги.
 pub async fn read_one(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(filename): Path<String>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse> {
     let (id, ext) = parse_filename(&filename)?;
+    ensure_visible(&state.db, &user, id).await?;
 
     // Файл книги неизменяем (на каждую загрузку новый id), значит разбор
     // меняется только вместе с версией парсера — она и есть ETag. Совпал —
@@ -601,7 +637,7 @@ async fn store_book(
     let (doc, imgs) = crate::images::extract(doc);
 
     if !force {
-        if let Some(id) = similar_book(&state.db, &meta.title, &meta.author).await? {
+        if let Some(id) = similar_book(&state.db, owner, &meta.title, &meta.author).await? {
             return Ok(Stored::Similar(id));
         }
     }
@@ -669,20 +705,29 @@ enum Stored {
 
 // ponytail: trigram similarity over every book, a seq scan per upload. Fine for a personal library;
 // at tens of thousands of books add a gin_trgm_ops index on title.
-async fn similar_book(db: &PgPool, title: &str, author: &str) -> Result<Option<Uuid>> {
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "select id from books
+async fn similar_book(
+    db: &PgPool,
+    viewer: Uuid,
+    title: &str,
+    author: &str,
+) -> Result<Option<Uuid>> {
+    let sql = format!(
+        "select id from books b
          where similarity(title, $1) >= $3
            and (author = '' or $2 = '' or lower(author) = lower($2) or similarity(author, $2) >= $4)
+           and {}
          order by similarity(title, $1) desc
          limit 1",
-    )
-    .bind(title)
-    .bind(author)
-    .bind(SAME_TITLE)
-    .bind(SAME_AUTHOR)
-    .fetch_optional(db)
-    .await?;
+        visible_to("$5")
+    );
+    let row: Option<(Uuid,)> = sqlx::query_as(&sql)
+        .bind(title)
+        .bind(author)
+        .bind(SAME_TITLE)
+        .bind(SAME_AUTHOR)
+        .bind(viewer)
+        .fetch_optional(db)
+        .await?;
     Ok(row.map(|(id,)| id))
 }
 
@@ -690,7 +735,10 @@ const SAME_TITLE: f32 = 0.8;
 const SAME_AUTHOR: f32 = 0.6;
 
 async fn one_book(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<serde_json::Value> {
-    let sql = format!("select {BOOK_COLS} {BOOK_FROM} where b.id = $2");
+    let sql = format!(
+        "select {BOOK_COLS} {BOOK_FROM} where b.id = $2 and {}",
+        visible_to("$1")
+    );
     let book = sqlx::query_as::<_, Book>(&sql)
         .bind(user.id)
         .bind(id)
@@ -948,6 +996,7 @@ pub async fn add_to_my(
     Path(filename): Path<String>,
 ) -> Result<StatusCode> {
     let (book_id, _) = parse_filename(&filename)?;
+    ensure_visible(&state.db, &user, book_id).await?;
 
     // Повторное добавление — не ошибка: кнопку могли нажать дважды или
     // из двух окон сразу.
@@ -1001,6 +1050,7 @@ pub async fn page_was_flipped(
     Json(body): Json<FlipBody>,
 ) -> Result<StatusCode> {
     let (book_id, _) = parse_filename(&body.book)?;
+    ensure_visible(&state.db, &user, book_id).await?;
 
     sqlx::query(
         "insert into reading_progress (user_id, book_id, position) values ($1, $2, $3)
@@ -1081,8 +1131,13 @@ mod tests {
             on_shelf,
             read_at: None,
             read_pos: None,
+            public: false,
         };
-        let user = |admin| AuthUser { id: me, admin };
+        let user = |admin| AuthUser {
+            id: me,
+            admin,
+            full: admin,
+        };
 
         let mine = book(Some(me), true).to_json(&user(false));
         assert_eq!(mine["mine"], true);
@@ -1114,8 +1169,9 @@ mod tests {
             .await
             .unwrap();
         sqlx::migrate!().run(&db).await.unwrap();
+        let viewer = Uuid::new_v4();
         let (id,): (Uuid,) = sqlx::query_as(
-            "insert into books (title, author, ext) values ($1, $2, 'epub') returning id",
+            "insert into books (title, author, ext, public) values ($1, $2, 'epub', true) returning id",
         )
         .bind("Важные годы. Почему не стоит откладывать жизнь на потом")
         .bind("Мэг Джей")
@@ -1125,7 +1181,7 @@ mod tests {
 
         let similar = |title: &'static str, author: &'static str| {
             let db = db.clone();
-            async move { similar_book(&db, title, author).await.unwrap() }
+            async move { similar_book(&db, viewer, title, author).await.unwrap() }
         };
         let brackets = "Важные годы [Почему не стоит откладывать жизнь на потом]";
         assert_eq!(similar(brackets, "Мэг Джей").await, Some(id));
@@ -1136,6 +1192,92 @@ mod tests {
 
         sqlx::query("delete from books where id = $1")
             .bind(id)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "needs DATABASE_URL pointing at a throwaway Postgres"]
+    async fn plain_readers_see_only_their_own_shelved_and_public_books() {
+        let db = PgPool::connect(&std::env::var("DATABASE_URL").unwrap())
+            .await
+            .unwrap();
+        sqlx::migrate!().run(&db).await.unwrap();
+        let user = |role: &'static str| {
+            let db = db.clone();
+            async move {
+                let (id,): (Uuid,) = sqlx::query_as(
+                    "insert into users (username, email, password_hash, role)
+                     values ('t', gen_random_uuid() || '@roles.test', '', $1) returning id",
+                )
+                .bind(role)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+                id
+            }
+        };
+        let (reader, friend) = (user("user").await, user("full").await);
+        let book = |owner: Uuid, public: bool| {
+            let db = db.clone();
+            async move {
+                let (id,): (Uuid,) = sqlx::query_as(
+                    "insert into books (title, ext, owner_id, public) values ('t', 'epub', $1, $2) returning id",
+                )
+                .bind(owner)
+                .bind(public)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+                id
+            }
+        };
+        let (own, public, foreign, shelved) = (
+            book(reader, false).await,
+            book(friend, true).await,
+            book(friend, false).await,
+            book(friend, false).await,
+        );
+        sqlx::query("insert into shelf (user_id, book_id) values ($1, $2)")
+            .bind(reader)
+            .bind(shelved)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let as_reader = AuthUser {
+            id: reader,
+            admin: false,
+            full: false,
+        };
+        for (id, seen) in [
+            (own, true),
+            (public, true),
+            (foreign, false),
+            (shelved, true),
+        ] {
+            assert_eq!(ensure_visible(&db, &as_reader, id).await.is_ok(), seen);
+        }
+        let sql = format!(
+            "select count(*) from books b where b.id = any($2) and {}",
+            visible_to("$1")
+        );
+        let (all,): (i64,) = sqlx::query_as(&sql)
+            .bind(friend)
+            .bind(vec![own, public, foreign, shelved])
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(all, 4);
+
+        sqlx::query("delete from users where id = any($1)")
+            .bind(vec![reader, friend])
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("delete from books where id = any($1)")
+            .bind(vec![own, public, foreign, shelved])
             .execute(&db)
             .await
             .unwrap();

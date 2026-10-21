@@ -2255,3 +2255,39 @@ li {
     padding-right: max(12px, env(safe-area-inset-right));
   }
 }
+
+.userPage .userDetails .notes.admin {
+  h4 {
+    margin: 16px 0 4px;
+  }
+  ul.wordList {
+    display: block;
+    max-height: none;
+    margin: 8px 0 0;
+  }
+  .wordList li {
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 8px 0;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    backdrop-filter: none;
+    transform: none;
+  }
+  .wordList b:has(input) {
+    flex: 1;
+    min-width: 0;
+  }
+  input {
+    width: 100%;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--ink);
+    background: var(--field);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+}

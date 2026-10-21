@@ -10,6 +10,7 @@ use axum::{
 use sqlx::postgres::PgPoolOptions;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
+mod admin;
 mod auth;
 mod books;
 mod images;
@@ -257,11 +258,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/export", get(me::export))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
-        // ponytail: registration closed for now, uncomment to reopen.
-        // .route("/registration", post(auth::registration))
+        .route("/registration", post(auth::registration))
         .route("/login", post(auth::login))
         .route("/logout", get(auth::logout))
         .route("/account", delete(auth::delete_account))
+        .route("/admin/users", get(admin::users))
+        .route("/admin/users/{id}/role", post(admin::set_role))
+        .route(
+            "/admin/invites",
+            get(admin::invites).post(admin::new_invite),
+        )
+        .route("/admin/invites/{token}", delete(admin::delete_invite))
+        .route("/admin/books/{filename}/public", post(admin::set_public))
         .route("/health", get(|| async { "ok" }))
         .fallback(|| async {
             AppError::new(StatusCode::NOT_FOUND, "Не найдено", "Not found")

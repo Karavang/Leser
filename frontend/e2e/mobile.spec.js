@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { CHAPTERS } from "./setup.js";
 
+const API = process.env.E2E_API ?? "http://localhost:4444";
 const book = () => JSON.parse(readFileSync("e2e/.book.json", "utf8"));
 const older = () => JSON.parse(readFileSync("e2e/.older.json", "utf8"));
 
@@ -152,6 +153,51 @@ test.describe("library", () => {
     const mine = shown.filter((t) => t.startsWith("E2E"));
     expect(mine).toEqual([book().title, older().title]);
     await expect(page.locator(".continue button").first()).toContainText(book().title);
+  });
+});
+
+test.describe("roles", () => {
+  const as = async (page, file) => {
+    const user = JSON.parse(readFileSync(file, "utf8"));
+    await page.addInitScript((user) => {
+      localStorage.setItem("token", JSON.stringify(user.token));
+      localStorage.setItem("user", JSON.stringify(user));
+    }, user);
+    return user;
+  };
+
+  test("a plain reader sees only public books and can't open the rest", async ({ page }) => {
+    const reader = await as(page, "e2e/.reader.json");
+    await page.goto("/");
+    const titles = page.locator(".bookList li h2");
+    await expect(titles.getByText(older().title, { exact: true })).toBeVisible();
+    await expect(titles.getByText(book().title, { exact: true })).toHaveCount(0);
+    await expect(titles.getByText("E2E чужая книга")).toHaveCount(0);
+    const read = await page.request.get(`${API}/read/${book().id}`, {
+      headers: { Authorization: `Bearer ${reader.token}` },
+    });
+    expect(read.status()).toBe(404);
+  });
+
+  test("an admin makes a one-time invite that grants the whole library", async ({ page }) => {
+    await page.goto("/me");
+    await page.locator("details.admin summary").click();
+    const created = page.waitForResponse((r) => r.url().endsWith("/admin/invites") && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Создать ссылку-приглашение" }).click();
+    const { token: invite } = await (await created).json();
+    await expect(page.locator(`details.admin input[value$="${invite}"]`)).toBeVisible();
+
+    const email = `invitee-${test.info().project.name}-${Date.now()}@leser.test`;
+    const signUp = (address) =>
+      page.request.post(`${API}/registration`, {
+        data: { username: "invitee", email: address, password: "e2e-password-123", invite },
+      });
+    const first = await signUp(email);
+    expect(first.status()).toBe(201);
+    const invitee = (await first.json()).data.user;
+    expect(invitee.role).toBe("full");
+    expect((await signUp(`again-${email}`)).status()).toBe(400);
+    await page.request.delete(`${API}/account`, { headers: { Authorization: `Bearer ${invitee.token}` } });
   });
 });
 

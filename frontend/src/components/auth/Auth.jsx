@@ -14,7 +14,8 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [inputType, setInputType] = useState("password");
-  const [isRegister, setIsReg] = useState(true);
+  const invite = new URLSearchParams(location.search).get("invite");
+  const [isRegister, setIsReg] = useState(!invite);
   const [isPassValid, setPassVal] = useState(false);
   const [isEmailValid, setEmailVal] = useState(false);
   const [isCanLogin, setLogin] = useState(false);
@@ -48,7 +49,7 @@ const Auth = () => {
 
   const login = () => authenticate("/api/login", { email, password });
   const registration = () =>
-    authenticate("/api/registration", { username, email, password });
+    authenticate("/api/registration", { username, email, password, invite });
 
   const checkEmail = (email) => {
     if (emailPattern.test(email)) {
@@ -115,12 +116,10 @@ const Auth = () => {
             }}
             type={inputType}
           />
-          {/* ponytail: registration closed for now, uncomment to reopen.
           <p>
             {t("noAccount")}{" "}
             <span onClick={() => setIsReg(false)}>{t("goRegister")}</span>
           </p>
-          */}
           <button
             id="loginButton"
             disabled={!isCanLogin}
@@ -132,6 +131,7 @@ const Auth = () => {
       ) : (
         <>
           <h1>{t("signUp")}</h1>
+          {invite && <p>{t("invitedSignUp")}</p>}
           <input
             type="text"
             placeholder={t("username")}

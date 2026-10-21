@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 
 const API = process.env.E2E_API ?? "http://localhost:4444";
@@ -5,6 +6,15 @@ const ORIGIN = "http://localhost:5199";
 // ponytail: fixed test account on the local dev stack only; never point E2E_API at prod.
 const USER = { username: "e2e", email: "e2e@leser.test", password: "e2e-password-123" };
 const EMPTY = { username: "e2e-empty", email: "e2e-empty@leser.test", password: "e2e-password-123" };
+const READER = { username: "e2e-reader", email: "e2e-reader@leser.test", password: "e2e-password-123" };
+const DB = process.env.E2E_DB ?? "leser-db-1";
+
+// ponytail: roles go straight into the dev database, since only an admin can grant one and the first admin has to come from somewhere.
+const setRole = (email, role) =>
+  execFileSync("docker", [
+    "exec", DB, "psql", "-U", "leser", "-d", "leser", "-c",
+    `update users set role = '${role}' where email = '${email}'`,
+  ]);
 
 export const CHAPTERS = ["Глава первая", "Глава вторая", "Глава третья"];
 
@@ -34,6 +44,7 @@ const json = (body) => ({
 
 export default async function setup() {
   await call("/registration", json(USER));
+  setRole(USER.email, "admin");
   const login = await call("/login", json({ email: USER.email, password: USER.password }));
   const user = login.body?.data?.user;
   if (!user?.token) throw new Error(`e2e login failed: ${login.status} ${JSON.stringify(login.body)}`);
@@ -61,11 +72,23 @@ export default async function setup() {
   await flip(book, "0");
 
   await call("/registration", json(EMPTY));
+  setRole(EMPTY.email, "full");
   const empty = (await call("/login", json({ email: EMPTY.email, password: EMPTY.password }))).body?.data?.user;
   if (!empty?.token) throw new Error("e2e login of the empty user failed");
   await writeFile("e2e/.empty.json", JSON.stringify(empty));
   const foreign = await put("E2E чужая книга", "e2e-foreign.fb2", { Authorization: `Bearer ${empty.token}` });
   await call(`/myBooks/${foreign.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${empty.token}` } });
+
+  await call(`/admin/books/${older.id}/public`, {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify({ public: true }),
+  });
+  await call("/registration", json(READER));
+  setRole(READER.email, "user");
+  const reader = (await call("/login", json({ email: READER.email, password: READER.password }))).body?.data?.user;
+  if (!reader?.token) throw new Error("e2e login of the plain reader failed");
+  await writeFile("e2e/.reader.json", JSON.stringify(reader));
 
   await writeFile("e2e/.book.json", JSON.stringify(book));
   await writeFile("e2e/.older.json", JSON.stringify(older));

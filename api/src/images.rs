@@ -118,10 +118,11 @@ fn total(doc: &str) -> usize {
 
 pub async fn token_for(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(filename): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
     let (id, _) = crate::books::parse_filename(&filename)?;
+    crate::books::ensure_visible(&state.db, &user, id).await?;
     Ok(Json(serde_json::json!({
         "token": crate::auth::book_token(&state.jwt_secret, id)?
     })))

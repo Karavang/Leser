@@ -102,6 +102,7 @@ pub async fn add_quote(
     Json(body): Json<QuoteBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let (book_id, _) = parse_filename(&body.book)?;
+    crate::books::ensure_visible(&state.db, &user, book_id).await?;
     let text = cut(&body.text, MAX_QUOTE);
     if text.is_empty() {
         return Err(AppError::bad("Пустая цитата", "Empty quote"));
@@ -199,6 +200,7 @@ pub async fn add_word(
     Json(body): Json<WordBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let (book_id, _) = parse_filename(&body.book)?;
+    crate::books::ensure_visible(&state.db, &user, book_id).await?;
     let word = cut(&body.word, MAX_WORD);
     if word.is_empty() {
         return Err(AppError::bad("Пустое слово", "Empty word"));

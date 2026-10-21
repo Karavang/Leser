@@ -20,16 +20,15 @@ const TOKEN_DAYS: i64 = 30;
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
     pub sub: Uuid,
-    pub admin: bool,
     pub exp: i64,
 }
 
-/// Извлекается из JWT без похода в БД — на каждый запрос экономится один запрос.
-// ponytail: токен нельзя отозвать до истечения 30 дней. Нужен "выйти на всех
-// устройствах" — добавить users.token_version и сверять с полем в claims.
+// ponytail: the role is read from the db on every request (one primary-key lookup), so a demotion
+// or a deleted account takes effect at once; the token itself still cannot be revoked before it expires.
 pub struct AuthUser {
     pub id: Uuid,
     pub admin: bool,
+    pub full: bool,
 }
 
 impl FromRequestParts<Arc<AppState>> for AuthUser {
@@ -53,14 +52,24 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         .map_err(|_| unauthorized())?
         .claims;
 
+        let (role,): (String,) = sqlx::query_as("select role from users where id = $1")
+            .bind(claims.sub)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or_else(unauthorized)?;
         Ok(AuthUser {
             id: claims.sub,
-            admin: claims.admin,
+            admin: role == ADMIN,
+            full: role != USER,
         })
     }
 }
 
-fn issue_token(secret: &str, id: Uuid, admin: bool) -> Result<String> {
+pub const ADMIN: &str = "admin";
+pub const FULL: &str = "full";
+pub const USER: &str = "user";
+
+fn issue_token(secret: &str, id: Uuid) -> Result<String> {
     let exp = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -68,11 +77,7 @@ fn issue_token(secret: &str, id: Uuid, admin: bool) -> Result<String> {
         + TOKEN_DAYS * 86_400;
     Ok(encode(
         &Header::default(),
-        &Claims {
-            sub: id,
-            admin,
-            exp,
-        },
+        &Claims { sub: id, exp },
         &EncodingKey::from_secret(secret.as_bytes()),
     )?)
 }
@@ -88,11 +93,7 @@ pub fn book_token(secret: &str, book: Uuid) -> Result<String> {
         + 86_400;
     Ok(encode(
         &Header::default(),
-        &Claims {
-            sub: book,
-            admin: false,
-            exp,
-        },
+        &Claims { sub: book, exp },
         &EncodingKey::from_secret(secret.as_bytes()),
     )?)
 }
@@ -126,6 +127,7 @@ pub struct RegisterBody {
     username: String,
     email: String,
     password: String,
+    invite: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +142,7 @@ struct UserRow {
     username: String,
     email: String,
     password_hash: String,
-    is_admin: bool,
+    role: String,
 }
 
 /// Тот же JSON, что отдавал Node, — фронт не трогаем.
@@ -150,7 +152,7 @@ async fn session_response(
     user: UserRow,
     code: StatusCode,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    let token = issue_token(&state.jwt_secret, user.id, user.is_admin)?;
+    let token = issue_token(&state.jwt_secret, user.id)?;
     let pages = crate::books::pages_of(&state.db, user.id).await?;
     Ok((
         code,
@@ -161,7 +163,8 @@ async fn session_response(
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
-                "isAdmin": user.is_admin,
+                "isAdmin": user.role == ADMIN,
+                "role": user.role,
                 "token": token,
                 "pages": pages,
             }},
@@ -169,7 +172,6 @@ async fn session_response(
     ))
 }
 
-#[allow(dead_code)]
 pub async fn registration(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RegisterBody>,
@@ -197,14 +199,39 @@ pub async fn registration(
         .hash_password(body.password.as_bytes(), &salt)?
         .to_string();
 
+    let mut tx = state.db.begin().await?;
+    let role = match body
+        .invite
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        None => USER,
+        Some(token) => {
+            sqlx::query("update invites set used_at = now() where token = $1 and used_at is null")
+                .bind(token)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected()
+                .eq(&1)
+                .then_some(FULL)
+                .ok_or_else(|| {
+                    AppError::bad(
+                        "Приглашение уже использовано или не существует",
+                        "The invite is used up or does not exist",
+                    )
+                })?
+        }
+    };
     let user = sqlx::query_as::<_, UserRow>(
-        "insert into users (username, email, password_hash) values ($1, $2, $3)
-         returning id, username, email, password_hash, is_admin",
+        "insert into users (username, email, password_hash, role) values ($1, $2, $3, $4)
+         returning id, username, email, password_hash, role",
     )
     .bind(body.username.trim())
     .bind(&email)
     .bind(&hash)
-    .fetch_one(&state.db)
+    .bind(role)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| match e {
         // уникальный индекс на email — гонку двух регистраций ловит БД, не мы
@@ -215,6 +242,14 @@ pub async fn registration(
         ),
         e => e.into(),
     })?;
+    if let Some(token) = &body.invite {
+        sqlx::query("update invites set used_by = $2 where token = $1")
+            .bind(token.trim())
+            .bind(user.id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
 
     session_response(&state, user, StatusCode::CREATED).await
 }
@@ -238,7 +273,7 @@ pub async fn login(
     }
 
     let user = sqlx::query_as::<_, UserRow>(
-        "select id, username, email, password_hash, is_admin from users where email = $1",
+        "select id, username, email, password_hash, role from users where email = $1",
     )
     .bind(body.email.trim().to_lowercase())
     .fetch_optional(&state.db)
@@ -301,7 +336,7 @@ mod tests {
     #[test]
     fn token_roundtrip() {
         let id = Uuid::new_v4();
-        let t = issue_token("s3cret", id, true).unwrap();
+        let t = issue_token("s3cret", id).unwrap();
         let c = decode::<Claims>(
             &t,
             &DecodingKey::from_secret(b"s3cret"),
@@ -310,7 +345,6 @@ mod tests {
         .unwrap()
         .claims;
         assert_eq!(c.sub, id);
-        assert!(c.admin);
         // чужим ключом не разбирается
         assert!(decode::<Claims>(
             &t,

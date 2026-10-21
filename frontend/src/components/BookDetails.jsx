@@ -20,7 +20,7 @@ const published = (v) => {
 
 // Нативный <dialog>: Esc, подложка, фокус внутри окна и inert для остальной
 // страницы — всё это браузер делает сам. Своего кода на это нет.
-export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
+export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -97,6 +97,11 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf }) => {
           <button onClick={() => onShelf(book)}>
             {book.mine ? t("shelfRemoveShort") : t("shelfAdd")}
           </button>
+          {book.canPublish && (
+            <button onClick={() => onPublic(book)}>
+              {book.public ? t("makePrivate") : t("makePublic")}
+            </button>
+          )}
           {book.canDelete && (
             <button
               className="deleteBook"

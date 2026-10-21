@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { clearSession } from "../session";
 import LogoutButton from "./LogoutButton";
+import { AdminPanel } from "./AdminPanel";
 import { LANGS, lang, setLang, t } from "../i18n";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
@@ -229,6 +230,8 @@ const UserPage = () => {
             ))}
           </ul>
         </details>
+
+        {user.isAdmin && <AdminPanel auth={auth} />}
 
         {/* details вместо кнопки с useState: открытие/закрытие, клавиатура
             и доступность уже есть в браузере, писать нечего */}
