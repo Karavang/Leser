@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import legacy from "@vitejs/plugin-legacy";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), legacy({ additionalLegacyPolyfills: ["whatwg-fetch"] })],
   // Фронт зовёт /api/* — тот же origin, поэтому CORS не участвует.
   // В dev проксирует vite, в контейнере nginx, на проде — nginx на leser.karavang.com.
   server: {

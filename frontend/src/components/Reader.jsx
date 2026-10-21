@@ -201,6 +201,10 @@ export const Reader = () => {
   useEffect(() => {
     const v = view.current;
     if (!v) return;
+    if (!window.ResizeObserver) {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
     const ro = new ResizeObserver(measure);
     ro.observe(v);
     return () => ro.disconnect();
