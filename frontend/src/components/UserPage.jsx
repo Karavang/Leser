@@ -37,12 +37,32 @@ const UserPage = () => {
   const [error, setError] = useState(null);
   const [stored, setStored] = useState([]);
   const [installPrompt, setInstallPrompt] = useState(window.installPrompt);
-  const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const [installed, setInstalled] = useState(
+    matchMedia("(display-mode: standalone)").matches || navigator.standalone,
+  );
+  const [installHow, setInstallHow] = useState(false);
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
 
   useEffect(() => {
     downloads().then(setStored);
+    const ready = () => setInstallPrompt(window.installPrompt);
+    const done = () => setInstalled(true);
+    window.addEventListener("installable", ready);
+    window.addEventListener("appinstalled", done);
+    return () => {
+      window.removeEventListener("installable", ready);
+      window.removeEventListener("appinstalled", done);
+    };
   }, []);
+
+  const install = async () => {
+    if (!installPrompt) return setInstallHow((v) => !v);
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    window.installPrompt = null;
+    setInstallPrompt(null);
+    if (outcome === "accepted") setInstalled(true);
+  };
 
   const unsave = (id) =>
     forgetDownload(id).then(() =>
@@ -338,25 +358,18 @@ const UserPage = () => {
             </select>
           </div>
 
-          {!installed && (installPrompt || ios) && (
+          {!installed && (
             <div className="settingsRow">
               <span>
                 {t("installApp")}
-                <small>{installPrompt ? t("installHint") : t("installIosHint")}</small>
+                <small>{t("installHint")}</small>
+                {installHow && (
+                  <small className="installHow">{ios ? t("installIosHint") : t("installMenuHint")}</small>
+                )}
               </span>
-              {installPrompt && (
-                <button
-                  className="secondary"
-                  onClick={async () => {
-                    installPrompt.prompt();
-                    await installPrompt.userChoice;
-                    window.installPrompt = null;
-                    setInstallPrompt(null);
-                  }}
-                >
-                  {t("install")}
-                </button>
-              )}
+              <button className="secondary" onClick={install}>
+                {t("install")}
+              </button>
             </div>
           )}
 

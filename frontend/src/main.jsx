@@ -28,6 +28,7 @@ if ("serviceWorker" in navigator) {
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   window.installPrompt = e;
+  window.dispatchEvent(new Event("installable"));
 });
 tellWorker();
 if (canOffline) navigator.storage?.persist?.();

@@ -107,7 +107,8 @@ export const RU = {
   // выгрузка
   installApp: "Установить приложение",
   installHint: "иконка на главном экране, работает офлайн",
-  installIosHint: "в Safari: «Поделиться» → «На экран Домой»",
+  installIosHint: "кнопка «Поделиться» □↑ внизу Safari → «На экран „Домой“» → «Добавить»",
+  installMenuHint: "меню браузера ⋮ → «Установить приложение» или «Добавить на главный экран»",
   install: "Установить",
   exportAll: "Забрать всё своё",
   exportHint: "закладки, полка, цитаты и словарь одним файлом",
@@ -269,7 +270,8 @@ export const EN = {
 
   installApp: "Install the app",
   installHint: "home screen icon, works offline",
-  installIosHint: "in Safari: Share → Add to Home Screen",
+  installIosHint: "Share button □↑ in Safari → Add to Home Screen → Add",
+  installMenuHint: "browser menu ⋮ → Install app or Add to Home screen",
   install: "Install",
   exportAll: "Take everything with you",
   exportHint: "bookmarks, shelf, quotes and dictionary in one file",
@@ -431,7 +433,8 @@ export const UK = {
 
   installApp: "Встановити застосунок",
   installHint: "іконка на головному екрані, працює офлайн",
-  installIosHint: "у Safari: «Поділитися» → «На початковий екран»",
+  installIosHint: "кнопка «Поділитися» □↑ у Safari → «На початковий екран» → «Додати»",
+  installMenuHint: "меню браузера ⋮ → «Встановити застосунок» або «Додати на головний екран»",
   install: "Встановити",
   exportAll: "Забрати все своє",
   exportHint: "закладки, полиця, цитати та словник одним файлом",
@@ -591,7 +594,8 @@ export const PL = {
 
   installApp: "Zainstaluj aplikację",
   installHint: "ikona na ekranie głównym, działa offline",
-  installIosHint: "w Safari: Udostępnij → Do ekranu początkowego",
+  installIosHint: "przycisk Udostępnij □↑ w Safari → Do ekranu początkowego → Dodaj",
+  installMenuHint: "menu przeglądarki ⋮ → Zainstaluj aplikację lub Dodaj do ekranu głównego",
   install: "Zainstaluj",
   exportAll: "Zabierz wszystko swoje",
   exportHint: "zakładki, półka, cytaty i słownik w jednym pliku",
@@ -751,7 +755,8 @@ export const DE = {
 
   installApp: "App installieren",
   installHint: "Symbol auf dem Home-Bildschirm, funktioniert offline",
-  installIosHint: "in Safari: Teilen → Zum Home-Bildschirm",
+  installIosHint: "Teilen-Taste □↑ in Safari → Zum Home-Bildschirm → Hinzufügen",
+  installMenuHint: "Browsermenü ⋮ → App installieren oder Zum Startbildschirm hinzufügen",
   install: "Installieren",
   exportAll: "Alles Eigene mitnehmen",
   exportHint: "Lesezeichen, Regal, Zitate und Wörterbuch in einer Datei",

@@ -50,6 +50,7 @@ body {
   color: var(--ink);
   margin: 0;
   padding: 0px 16px;
+  overflow-wrap: break-word;
   scrollbar-width: thin;
   scrollbar-color: auto;
 
@@ -1483,6 +1484,13 @@ li {
       color: var(--dim);
       font-size: 0.75rem;
     }
+    .installHow {
+      margin-top: 6px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--field);
+    }
 
     @media (max-width: 480px) {
       align-items: flex-start;
@@ -2203,7 +2211,7 @@ li {
   .notes,
   .settings {
     margin-top: 8px;
-    padding: 0;
+    padding: 0 16px;
     border: none;
     border-radius: 14px;
     background: var(--card);
@@ -2211,7 +2219,7 @@ li {
     summary {
       width: auto;
       min-height: 52px;
-      padding: 0 16px;
+      padding: 0;
       border-radius: 0;
       background: none;
       color: var(--ink);
@@ -2230,12 +2238,11 @@ li {
         transition: transform 0.2s;
       }
     }
+    &[open] {
+      padding-bottom: 12px;
+    }
     &[open] summary::after {
       transform: rotate(90deg);
-    }
-    > :not(summary) {
-      margin-left: 16px;
-      margin-right: 16px;
     }
     .settingsRow {
       flex-wrap: wrap;
@@ -2259,8 +2266,8 @@ li {
   }
   .readerBar,
   .readerFoot {
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
   }
 }
 
@@ -2284,9 +2291,16 @@ li {
     backdrop-filter: none;
     transform: none;
   }
+  .wordList b {
+    min-width: 0;
+  }
   .wordList b:has(input) {
     flex: 1;
+  }
+  .wordList span {
+    flex: 1 1 10rem;
     min-width: 0;
+    overflow-wrap: anywhere;
   }
   input {
     width: 100%;
