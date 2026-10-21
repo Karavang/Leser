@@ -231,7 +231,7 @@ const UserPage = () => {
           </ul>
         </details>
 
-        {user.isAdmin && <AdminPanel auth={auth} />}
+        <AdminPanel auth={auth} />
 
         {/* details вместо кнопки с useState: открытие/закрытие, клавиатура
             и доступность уже есть в браузере, писать нечего */}

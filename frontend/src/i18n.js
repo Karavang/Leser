@@ -158,6 +158,7 @@ export const RU = {
   makePrivate: "Убрать из общих",
   publicFailed: "Не удалось поменять доступ",
   usedBy: (name) => `использовано: ${name}`,
+  publicDomain: "Общественное достояние",
 };
 
 export const EN = {
@@ -303,6 +304,7 @@ export const EN = {
   makePrivate: "Remove from public",
   publicFailed: "Could not change access",
   usedBy: (name) => `used by ${name}`,
+  publicDomain: "Public domain",
 };
 
 export const UK = {
@@ -447,6 +449,7 @@ export const UK = {
   makePrivate: "Прибрати із загальних",
   publicFailed: "Не вдалося змінити доступ",
   usedBy: (name) => `використано: ${name}`,
+  publicDomain: "Суспільне надбання",
 };
 
 export const PL = {
@@ -591,6 +594,7 @@ export const PL = {
   makePrivate: "Usuń z publicznych",
   publicFailed: "Nie udało się zmienić dostępu",
   usedBy: (name) => `użył(a): ${name}`,
+  publicDomain: "Domena publiczna",
 };
 
 export const DE = {
@@ -735,6 +739,7 @@ export const DE = {
   makePrivate: "Aus öffentlichen entfernen",
   publicFailed: "Zugriff ließ sich nicht ändern",
   usedBy: (name) => `benutzt von ${name}`,
+  publicDomain: "Gemeinfrei",
 };
 
 /// Языки интерфейса: код, как он пишется в `lang`, и название на себе самом —

@@ -80,6 +80,23 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
               </dd>
             </>
           )}
+          {book.publicBasis && (
+            <>
+              <dt>{t("publicDomain")}</dt>
+              <dd>
+                {book.publicBasis.split(", ").map((who) => (
+                  <a
+                    key={who}
+                    href={`https://www.wikidata.org/wiki/${who.split(" ")[0]}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    {who}{" "}
+                  </a>
+                ))}
+              </dd>
+            </>
+          )}
           {addedAt && (
             <>
               <dt>{t("addedAt")}</dt>

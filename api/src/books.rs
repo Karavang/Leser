@@ -38,6 +38,7 @@ pub struct Book {
     read_at: Option<DateTime<Utc>>,
     read_pos: Option<String>,
     public: bool,
+    public_basis: Option<String>,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -56,7 +57,7 @@ pub const BOOK_EXTS: [&str; 9] = [
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
-     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public";
+     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public, b.public_basis";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
 const BOOK_FROM: &str = "from books b
      left join users u on u.id = b.owner_id
@@ -170,6 +171,7 @@ impl Book {
                 .filter(|p| (0.0..=1.0).contains(p)),
             "canDelete": owner || user.admin,
             "public": self.public,
+            "publicBasis": self.public_basis,
             "canPublish": user.admin,
         })
     }
@@ -777,7 +779,10 @@ pub async fn put_new_one(
 
     let (code, duplicate, id) =
         match store_book(&state, user.id, &ext, &name, bytes, None, upload.force).await? {
-            Stored::New(id) => (StatusCode::OK, None, id),
+            Stored::New(id) => {
+                tokio::spawn(crate::legal::check(state.clone(), id));
+                (StatusCode::OK, None, id)
+            }
             Stored::Same(id) => (StatusCode::CONFLICT, Some("same"), id),
             Stored::Similar(id) => (StatusCode::CONFLICT, Some("similar"), id),
         };
@@ -852,6 +857,7 @@ pub async fn edit_one(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    tokio::spawn(crate::legal::check(state.clone(), id));
 
     Ok(Json(one_book(&state.db, &user, id).await?))
 }
@@ -947,7 +953,11 @@ pub async fn import(
     let source = body.page_url.as_deref().unwrap_or(&body.url);
     let location =
         match store_book(&state, user.id, &ext, url.path(), bytes, Some(source), true).await? {
-            Stored::New(id) | Stored::Same(id) | Stored::Similar(id) => id,
+            Stored::New(id) => {
+                tokio::spawn(crate::legal::check(state.clone(), id));
+                id
+            }
+            Stored::Same(id) | Stored::Similar(id) => id,
         };
 
     Ok(Json(serde_json::json!({
@@ -1132,6 +1142,7 @@ mod tests {
             read_at: None,
             read_pos: None,
             public: false,
+            public_basis: None,
         };
         let user = |admin| AuthUser {
             id: me,

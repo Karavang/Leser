@@ -14,6 +14,7 @@ mod admin;
 mod auth;
 mod books;
 mod images;
+mod legal;
 mod me;
 mod mobi;
 mod parse;
@@ -210,6 +211,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         github_token: std::env::var("GITHUB_TOKEN").ok().filter(|t| !t.is_empty()),
         db,
     });
+    tokio::spawn(legal::backfill(state.clone()));
     if state.github_token.is_none() {
         tracing::info!("GITHUB_TOKEN не задан — поиск по GitHub выключен");
     }

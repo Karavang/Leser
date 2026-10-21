@@ -11,7 +11,7 @@ const ROLES = [
 const inviteLink = (token) => `${location.origin}/login?invite=${token}`;
 
 export const AdminPanel = ({ auth }) => {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState(null);
   const [invites, setInvites] = useState([]);
   const [copied, setCopied] = useState(null);
   const [error, setError] = useState(null);
@@ -23,7 +23,7 @@ export const AdminPanel = ({ auth }) => {
         setUsers(u.data);
         setInvites(i.data);
       })
-      .catch(fail);
+      .catch((e) => e.response?.status !== 403 && fail(e));
 
   useEffect(() => {
     load();
@@ -50,6 +50,9 @@ export const AdminPanel = ({ auth }) => {
       .post(`/api/admin/users/${id}/role`, { role }, auth)
       .then(() => setUsers((list) => list.map((u) => (u.id === id ? { ...u, role } : u))))
       .catch(fail);
+
+  // ponytail: the server decides who is an admin, so a session stored before a promotion still shows the panel.
+  if (!users && !error) return null;
 
   return (
     <details className="notes admin">
@@ -85,7 +88,7 @@ export const AdminPanel = ({ auth }) => {
 
       <h4>{t("readers")}</h4>
       <ul className="wordList">
-        {users.map((u) => (
+        {users?.map((u) => (
           <li key={u.id}>
             <b>{u.username}</b>
             <span>{u.email}</span>
