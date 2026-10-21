@@ -11,6 +11,7 @@ import UpButton from "./ui/UpButton";
 import { BusyLine, Loading } from "./ui/Loading";
 import { clearSession } from "./session";
 import { t } from "./i18n";
+import { downloadedIds, useOffline } from "./offline";
 
 const icon = (d) => (
   <svg
@@ -48,6 +49,8 @@ export const Home = () => {
   const navigate = useNavigate();
   const token = useMemo(() => JSON.parse(localStorage.getItem("token")), []);
 
+  const offline = useOffline() === "offline";
+
   const reload = useCallback(() => setReloadKey((n) => n + 1), []);
 
   const handleScroll = useCallback(() => {
@@ -69,8 +72,13 @@ export const Home = () => {
           params: filter.trim() ? { q: filter.trim() } : {},
           headers: { Authorization: `Bearer ${token}` },
         });
-        setBooks(response.data);
-        if (!filter.trim()) setHasShelf(response.data.some((book) => book.mine));
+        let list = response.data;
+        if (offline) {
+          const have = await downloadedIds();
+          list = list.filter((book) => have.has(String(book.id)));
+        }
+        setBooks(list);
+        if (!filter.trim()) setHasShelf(list.some((book) => book.mine));
       } catch (error) {
         // токен протух за 30 дней жизни — на вход, а не в пустой экран
         if (error.response?.status === 401) {
@@ -83,7 +91,7 @@ export const Home = () => {
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [token, filter, reloadKey, navigate]);
+  }, [token, filter, reloadKey, navigate, offline]);
 
   // Внешние источники — отдельным запросом, а не вместе со своей библиотекой:
   // сеть чужая, отвечает медленнее и может не ответить вовсе, а свои книги

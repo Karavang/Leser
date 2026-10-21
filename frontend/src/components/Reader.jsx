@@ -10,6 +10,8 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { LoadingBook } from "../ui/Loading.jsx";
 import { t } from "../i18n";
+import { isOffline } from "../offline";
+import { sendPage, unsentPage } from "../sync";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
 /// Читалка одна на все форматы: сервер отдаёт книгу главами с разметкой
@@ -116,7 +118,7 @@ export const Reader = () => {
     // Где читатель остановился, знает сервер, а не эта вкладка: сессия здесь
     // могла открыться вчера, а читали с телефона. Своя закладка остаётся
     // запасным вариантом — на случай, если сервер не ответит.
-    const where = fromQuote
+    const where = fromQuote || isOffline()
       ? Promise.resolve(null)
       : axios.get(`/api/progress/${id}`, auth).catch(() => null);
 
@@ -129,7 +131,7 @@ export const Reader = () => {
     Promise.all([axios.get(`/api/read/${id}`, fresh), where])
       .then(([read, progress]) => {
         if (!alive) return;
-        const at = Number.parseFloat(progress?.data?.page);
+        const at = Number.parseFloat(unsentPage(id) ?? progress?.data?.page);
         if (Number.isFinite(at) && at >= 0 && at < 1) spot.current = at;
         setBook(read.data);
         if (read.data.chapters?.some((c) => c.html.includes('src="img/'))) {
@@ -340,15 +342,7 @@ export const Reader = () => {
     if (fromQuote && !moved.current) return;
     const frac = page / total;
     rememberSpot(id, frac);
-    const timer = setTimeout(() => {
-      axios
-        .post(
-          "/api/pageWasFlipped",
-          { book: id, page: String(frac) },
-          { headers: { Authorization: `Bearer ${token}` } },
-        )
-        .catch(() => {});
-    }, 800);
+    const timer = setTimeout(() => sendPage(id, String(frac)), 800);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, total, book, id]);

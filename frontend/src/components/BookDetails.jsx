@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { canOffline, download, downloadedIds } from "../offline";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -22,6 +23,18 @@ const published = (v) => {
 // страницы — всё это браузер делает сам. Своего кода на это нет.
 export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
   const ref = useRef(null);
+  const [saved, setSaved] = useState(null);
+
+  useEffect(() => {
+    downloadedIds().then((have) => setSaved(have.has(String(book.id)) ? "done" : null));
+  }, [book.id]);
+
+  const save = () => {
+    setSaved("busy");
+    download(book.id)
+      .then(() => setSaved("done"))
+      .catch(() => setSaved("failed"));
+  };
 
   useEffect(() => {
     ref.current.showModal();
@@ -109,6 +122,20 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
 
         <div className="detailsActions">
           <button onClick={() => ref.current.close()}>{t("close")}</button>
+          {canOffline && (
+            <button
+              onClick={save}
+              disabled={saved === "busy" || saved === "done"}
+            >
+              {saved === "busy"
+                ? t("downloading")
+                : saved === "done"
+                  ? t("downloaded")
+                  : saved === "failed"
+                    ? t("downloadFailed")
+                    : t("download")}
+            </button>
+          )}
           {/* Убрать с полки — не то же самое, что удалить: книга остаётся
               в библиотеке, поэтому и кнопка обычная, без предупреждения. */}
           <button onClick={() => onShelf(book)}>
