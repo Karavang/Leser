@@ -36,6 +36,9 @@ const UserPage = () => {
   const [theme, setTheme] = useState(saved);
   const [error, setError] = useState(null);
   const [stored, setStored] = useState([]);
+  const [installPrompt, setInstallPrompt] = useState(window.installPrompt);
+  const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
 
   useEffect(() => {
     downloads().then(setStored);
@@ -334,6 +337,28 @@ const UserPage = () => {
               ))}
             </select>
           </div>
+
+          {!installed && (installPrompt || ios) && (
+            <div className="settingsRow">
+              <span>
+                {t("installApp")}
+                <small>{installPrompt ? t("installHint") : t("installIosHint")}</small>
+              </span>
+              {installPrompt && (
+                <button
+                  className="secondary"
+                  onClick={async () => {
+                    installPrompt.prompt();
+                    await installPrompt.userChoice;
+                    window.installPrompt = null;
+                    setInstallPrompt(null);
+                  }}
+                >
+                  {t("install")}
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="settingsRow">
             <span>

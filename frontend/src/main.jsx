@@ -25,6 +25,10 @@ axios.defaults.headers.common["X-Lang"] = lang;
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
 }
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  window.installPrompt = e;
+});
 tellWorker();
 if (canOffline) navigator.storage?.persist?.();
 sendUnsent();

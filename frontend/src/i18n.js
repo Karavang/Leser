@@ -105,6 +105,10 @@ export const RU = {
   saveFailed: "Не удалось сохранить",
 
   // выгрузка
+  installApp: "Установить приложение",
+  installHint: "иконка на главном экране, работает офлайн",
+  installIosHint: "в Safari: «Поделиться» → «На экран Домой»",
+  install: "Установить",
   exportAll: "Забрать всё своё",
   exportHint: "закладки, полка, цитаты и словарь одним файлом",
   exportDo: "Выгрузить",
@@ -263,6 +267,10 @@ export const EN = {
   ankiExport: "Anki cards",
   saveFailed: "Could not save",
 
+  installApp: "Install the app",
+  installHint: "home screen icon, works offline",
+  installIosHint: "in Safari: Share → Add to Home Screen",
+  install: "Install",
   exportAll: "Take everything with you",
   exportHint: "bookmarks, shelf, quotes and dictionary in one file",
   exportDo: "Export",
@@ -421,6 +429,10 @@ export const UK = {
   ankiExport: "Картки для Anki",
   saveFailed: "Не вдалося зберегти",
 
+  installApp: "Встановити застосунок",
+  installHint: "іконка на головному екрані, працює офлайн",
+  installIosHint: "у Safari: «Поділитися» → «На початковий екран»",
+  install: "Встановити",
   exportAll: "Забрати все своє",
   exportHint: "закладки, полиця, цитати та словник одним файлом",
   exportDo: "Вивантажити",
@@ -577,6 +589,10 @@ export const PL = {
   ankiExport: "Fiszki do Anki",
   saveFailed: "Nie udało się zapisać",
 
+  installApp: "Zainstaluj aplikację",
+  installHint: "ikona na ekranie głównym, działa offline",
+  installIosHint: "w Safari: Udostępnij → Do ekranu początkowego",
+  install: "Zainstaluj",
   exportAll: "Zabierz wszystko swoje",
   exportHint: "zakładki, półka, cytaty i słownik w jednym pliku",
   exportDo: "Eksportuj",
@@ -733,6 +749,10 @@ export const DE = {
   ankiExport: "Karten für Anki",
   saveFailed: "Konnte nicht gespeichert werden",
 
+  installApp: "App installieren",
+  installHint: "Symbol auf dem Home-Bildschirm, funktioniert offline",
+  installIosHint: "in Safari: Teilen → Zum Home-Bildschirm",
+  install: "Installieren",
   exportAll: "Alles Eigene mitnehmen",
   exportHint: "Lesezeichen, Regal, Zitate und Wörterbuch in einer Datei",
   exportDo: "Exportieren",
