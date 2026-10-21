@@ -116,11 +116,7 @@ pub async fn check(state: Arc<AppState>, id: Uuid) {
             }
         }
     }
-    let year = Utc::now()
-        .format("%Y")
-        .to_string()
-        .parse()
-        .unwrap_or(0);
+    let year = Utc::now().format("%Y").to_string().parse().unwrap_or(0);
     let basis = verdict(&found, &lang, year);
     if let Err(e) = sqlx::query(
         "update books set legal_checked_at = now(),
