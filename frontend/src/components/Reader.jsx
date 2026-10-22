@@ -10,7 +10,7 @@ import {
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { LoadingBook } from "../ui/Loading.jsx";
 import { t } from "../i18n";
-import { isOffline } from "../offline";
+import { isOffline, useOffline } from "../offline";
 import { sendPage, unsentPage } from "../sync";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
@@ -21,17 +21,67 @@ import { applyTheme, theme as saved, THEMES } from "../theme";
 /// экрана, а «перелистнуть» — это прокрутить ровно на ширину окна. Своей
 /// разбивки на страницы нет и не нужно: браузер уже умеет верстать колонки.
 
-const FONTS = [16, 18, 20, 22, 25, 28, 32];
+const SIZE = [14, 36];
 
 const TOUCH = matchMedia("(pointer: coarse), (max-width: 720px)").matches;
 
-const nativeFont = () => {
+const clamp = (lo, x, hi) => Math.min(hi, Math.max(lo, x));
+
+// ponytail: read once per page load; changing Dynamic Type or the browser font size mid-session applies on the next open
+const IOS =
+  navigator.maxTouchPoints > 0 && /iPhone|iPad|Macintosh/.test(navigator.userAgent);
+
+const deviceScale = () => {
   const probe = document.createElement("p");
   probe.style.font = "-apple-system-body";
+  if (!IOS || !probe.style.font) {
+    const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return clamp(0.85, (root || 16) / 16, 1.6);
+  }
   document.body.append(probe);
-  const px = Number.parseFloat(getComputedStyle(probe).fontSize) || 16;
+  const px = Number.parseFloat(getComputedStyle(probe).fontSize) || 17;
   probe.remove();
-  return FONTS.reduce((a, b) => (Math.abs(b - px) < Math.abs(a - px) ? b : a));
+  return clamp(0.85, px / 17, 1.6);
+};
+
+const SCALE = deviceScale();
+const SHORT = Math.min(screen.width, screen.height);
+const TABLET = TOUCH && SHORT >= 600;
+const UI = clamp(0.9, SCALE * (TABLET ? 1.15 : 1), 1.5);
+const baseSize = () =>
+  Math.round(clamp(SIZE[0], (TOUCH ? clamp(17, 14 + SHORT / 120, 22) : 20) * SCALE, SIZE[1]));
+
+const FAMILIES = {
+  serif: '"Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif',
+  book: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif',
+  sans: '-apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+};
+const LEADING = [1.3, 1.55, 1.8, 2.1];
+const MARGIN = [8, 16, 32, 56];
+const VMARGIN = [8, 24, 48];
+
+const freshLook = () => ({
+  family: "serif",
+  size: baseSize(),
+  leading: 1.55,
+  margin: TOUCH ? 16 : 32,
+  vmargin: 24,
+  align: "justify",
+  hyphens: "on",
+  indent: "on",
+  cols: "auto",
+});
+
+// ponytail: trusts whatever is in readerLook; a junk value only yields a bad CSS value, reset fixes it
+const savedLook = () => {
+  let look = {};
+  try {
+    look = JSON.parse(localStorage.getItem("readerLook")) || {};
+  } catch {
+    look = {};
+  }
+  const old = Number(localStorage.getItem("readerFont"));
+  return { ...freshLook(), ...(old ? { size: old } : {}), ...look };
 };
 
 /// Где читатель остановился — доля книги, а не номер страницы: страницы
@@ -120,10 +170,9 @@ export const Reader = () => {
   const [sel, setSel] = useState(null);
   /// короткий ответ на «сохранил» — гаснет сам
   const [said, setSaid] = useState(null);
-  const [font, setFont] = useState(
-    () =>
-      Number(localStorage.getItem("readerFont")) || (TOUCH ? nativeFont() : 20),
-  );
+  const [look, setLook] = useState(savedLook);
+  const [lookOpen, setLookOpen] = useState(false);
+  const offline = useOffline() === "offline";
   const [theme, setTheme] = useState(saved);
   const [bars, setBars] = useState(false);
   /// иллюстрации: у книги-альбома они и есть книга, в дороге — лишние
@@ -217,8 +266,11 @@ export const Reader = () => {
 
   useLayoutEffect(() => {
     rate.current = { basis: 0, perChar: 0 };
-  }, [font]);
-  useLayoutEffect(measure, [html, ch, font, measure]);
+  }, [look]);
+  useLayoutEffect(measure, [html, ch, look, measure]);
+  useEffect(() => {
+    localStorage.setItem("readerLook", JSON.stringify(look));
+  }, [look]);
 
   useEffect(() => {
     const v = view.current;
@@ -324,7 +376,11 @@ export const Reader = () => {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") return toc ? setToc(false) : close();
+      if (e.key === "Escape") {
+        if (toc) return setToc(false);
+        return lookOpen ? setLookOpen(false) : close();
+      }
+      if (e.target.closest?.("input")) return;
       if (["ArrowRight", "PageDown", " "].includes(e.key)) {
         e.preventDefault();
         go(page + 1);
@@ -336,7 +392,7 @@ export const Reader = () => {
     return () => document.removeEventListener("keydown", onKey);
     // close меняется каждый рендер, но делает всегда одно и то же
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [go, page, last, toc]);
+  }, [go, page, last, toc, lookOpen]);
 
   // Перелистывание двумя пальцами по тачпаду. Нативно прокрутить читалку
   // нельзя — у неё overflow: hidden, — поэтому горизонтальное колесо сами
@@ -431,10 +487,7 @@ export const Reader = () => {
       .finally(() => setTimeout(() => setSaid(null), 2500));
   };
 
-  const pick = (size) => {
-    setFont(size);
-    localStorage.setItem("readerFont", String(size));
-  };
+  const set = (key, value) => setLook((l) => ({ ...l, [key]: value }));
   // Тема одна на всё приложение: кружок в читалке перекрашивает и библиотеку.
   const paint = (name) => {
     setTheme(name);
@@ -454,53 +507,151 @@ export const Reader = () => {
 
   const percent = Math.round(frac * 100);
 
-  const tools = (
-    <div className="readerTools">
-      <button
-        className="flat"
-        title={t("fontSmaller")}
-        disabled={font <= FONTS[0]}
-        onClick={() => pick(FONTS[FONTS.indexOf(font) - 1] ?? FONTS[0])}
-      >
-        A−
-      </button>
-      <button
-        className="flat"
-        title={t("fontBigger")}
-        disabled={font >= FONTS[FONTS.length - 1]}
-        onClick={() =>
-          pick(FONTS[FONTS.indexOf(font) + 1] ?? FONTS[FONTS.length - 1])
-        }
-      >
-        A+
-      </button>
-      {THEMES.map((name) => (
+  const hasPics = book.chapters?.some((c) => c.html.includes('src="img/'));
+
+  const seg = (key, options, label) => (
+    <div className="seg">
+      {options.map((o) => (
         <button
-          key={name}
-          className={`swatch ${name} ${theme === name ? "active" : ""}`}
-          title={t(`theme${name[0].toUpperCase()}${name.slice(1)}`)}
-          aria-pressed={theme === name}
-          onClick={() => paint(name)}
-        />
-      ))}
-      {book.chapters?.some((c) => c.html.includes('src="img/')) && (
-        <button
-          className={`flat ${pics ? "active" : ""}`}
-          title={t(pics ? "picsOff" : "picsOn")}
-          aria-pressed={pics}
-          onClick={() => {
-            localStorage.setItem("readerPics", pics ? "off" : "on");
-            setPics(!pics);
-          }}
+          key={o}
+          className={look[key] === o ? "active" : ""}
+          aria-pressed={look[key] === o}
+          title={String(o)}
+          onClick={() => set(key, o)}
         >
-          ▦
+          {label(o)}
         </button>
+      ))}
+    </div>
+  );
+  const bars3 = <><b /><b /><b /></>;
+
+  const panel = (
+    <div className="readerLook" role="dialog" aria-label={t("look")}>
+      <header>
+        <b>{t("look")}</b>
+        <button
+          className="tocClose"
+          title={t("close")}
+          aria-label={t("close")}
+          onClick={() => setLookOpen(false)}
+        >
+          ×
+        </button>
+      </header>
+      <div className="lookRow">
+        <span>{t("theme")}</span>
+        <div className="seg">
+          {THEMES.map((name) => (
+            <button
+              key={name}
+              className={`swatch ${name} ${theme === name ? "active" : ""}`}
+              title={t(`theme${name[0].toUpperCase()}${name.slice(1)}`)}
+              aria-pressed={theme === name}
+              onClick={() => paint(name)}
+            />
+          ))}
+        </div>
+      </div>
+      <label className="lookRow">
+        <span>
+          {t("lookSize")} · {look.size}px
+        </span>
+        <div className="lookSize">
+          <small>A</small>
+          <input
+            type="range"
+            min={SIZE[0]}
+            max={SIZE[1]}
+            value={look.size}
+            onChange={(e) => set("size", Number(e.target.value))}
+          />
+          <big>A</big>
+        </div>
+      </label>
+      <div className="lookRow">
+        <span>{t("lookFont")}</span>
+        {seg("family", Object.keys(FAMILIES), (f) => (
+          <span style={{ fontFamily: FAMILIES[f] }}>
+            {t(`font${f[0].toUpperCase()}${f.slice(1)}`)}
+          </span>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookLeading")}</span>
+        {seg("leading", LEADING, (v) => (
+          <i className="glyph" style={{ "--gap": `${(v - 1) * 9}px` }}>
+            {bars3}
+          </i>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookMargin")}</span>
+        {seg("margin", MARGIN, (v) => (
+          <i className="glyph page" style={{ "--side": `${v / 8}px` }}>
+            {bars3}
+          </i>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookVmargin")}</span>
+        {seg("vmargin", VMARGIN, (v) => (
+          <i className="glyph page" style={{ "--top": `${v / 8}px` }}>
+            {bars3}
+          </i>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookAlign")}</span>
+        {seg("align", ["justify", "left"], (a) => (
+          <i className={`glyph ${a}`} aria-label={t(`align${a[0].toUpperCase()}${a.slice(1)}`)}>
+            {bars3}
+          </i>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookHyph")}</span>
+        {seg("hyphens", ["on", "off"], t)}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookIndent")}</span>
+        {seg("indent", ["on", "off"], t)}
+      </div>
+      <div className="lookRow cols">
+        <span>{t("lookCols")}</span>
+        {seg("cols", ["auto", "1", "2"], (c) => (c === "auto" ? t("auto") : c))}
+      </div>
+      {hasPics && (
+        <div className="lookRow">
+          <span>{t("lookPics")}</span>
+          <div className="seg">
+            {[true, false].map((on) => (
+              <button
+                key={String(on)}
+                className={pics === on ? "active" : ""}
+                aria-pressed={pics === on}
+                onClick={() => {
+                  localStorage.setItem("readerPics", on ? "on" : "off");
+                  setPics(on);
+                }}
+              >
+                {t(on ? "on" : "off")}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
+      <button className="lookReset" onClick={() => setLook(freshLook())}>
+        {t("lookReset")}
+      </button>
     </div>
   );
 
   return (
-    <div className={`reader ${theme} ${bars ? "" : "bare"}`}>
+    <div
+      className={`reader ${theme} ${bars ? "" : "bare"}`}
+      style={{ "--m": look.margin, "--v": look.vmargin, "--ui": UI }}
+    >
       <header className="readerBar">
         <button
           className="flat"
@@ -513,11 +664,25 @@ export const Reader = () => {
           <b>{book.title}</b>
           <span>{book.chapters[ch]?.title || book.author}</span>
         </div>
-        {!TOUCH && tools}
+        <button
+          className={`flat aa ${lookOpen ? "active" : ""}`}
+          title={t("look")}
+          aria-expanded={lookOpen}
+          onClick={() => {
+            setToc(false);
+            setLookOpen(!lookOpen);
+            if (TOUCH) setBars(false);
+          }}
+        >
+          Aa
+        </button>
         <button
           className={`flat ${toc ? "active" : ""}`}
           title={t("contents")}
-          onClick={() => setToc(!toc)}
+          onClick={() => {
+            setLookOpen(false);
+            setToc(!toc);
+          }}
         >
           ☰
         </button>
@@ -554,7 +719,15 @@ export const Reader = () => {
             // по какому словарю ломать слово, и текст в узкой колонке рвётся
             // огромными пробелами
             lang={book.lang || undefined}
-            style={{ "--fs": `${font}px` }}
+            data-align={look.align}
+            data-hyph={look.hyphens}
+            data-indent={look.indent}
+            data-cols={look.cols}
+            style={{
+              "--fs": `${look.size}px`,
+              "--lh": look.leading,
+              "--ff": FAMILIES[look.family] ?? FAMILIES.serif,
+            }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         </div>
@@ -570,6 +743,13 @@ export const Reader = () => {
         {toc && (
           <div className="readerTocShade" onClick={() => setToc(false)} />
         )}
+        {lookOpen && (
+          <div
+            className="readerTocShade clear"
+            onClick={() => setLookOpen(false)}
+          />
+        )}
+        {lookOpen && panel}
         {toc && (
           <nav className="readerToc" aria-label={t("contents")}>
             <header>
@@ -671,9 +851,10 @@ export const Reader = () => {
           }}
         />
         <span>
+          {offline && <i className="netDot" title={t("offlineMode")} />}
+          {offline && `${t("offlineShort")} · `}
           {here + 1} / {total} · {percent}%
         </span>
-        {TOUCH && tools}
       </footer>
     </div>
   );

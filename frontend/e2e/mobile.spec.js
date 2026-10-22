@@ -275,16 +275,32 @@ test.describe("reader", () => {
     await hudShown(page);
   });
 
-  test("font and theme controls work", async ({ page }) => {
+  test("appearance panel changes the text and survives a reload", async ({ page }) => {
     await openBook(page);
     await tapAt(page, 0.5, 0.05);
-    const size = () =>
-      page.locator(".readerPages").evaluate((el) => parseFloat(el.style.getPropertyValue("--fs")));
+    const pages = page.locator(".readerPages");
+    const size = () => pages.evaluate((el) => parseFloat(el.style.getPropertyValue("--fs")));
     const before = await size();
-    await page.getByTitle("Больше шрифт").click();
-    await expect.poll(size).toBeGreaterThan(before);
-    await page.getByTitle("Ночь").click();
+    await page.getByTitle("Оформление").click();
+    const panel = page.getByRole("dialog", { name: "Оформление" });
+    await panel.getByRole("slider").fill(String(before + 4));
+    await expect.poll(size).toBe(before + 4);
+    await panel.getByTitle("2.1").click();
+    await panel.getByTitle("56").click();
+    await panel.getByRole("button", { name: "По левому краю" }).click();
+    await panel.getByTitle("Ночь").click();
     await expect(page.locator(".reader")).toHaveClass(/\bnight\b/);
+    await expect(pages).toHaveAttribute("data-align", "left");
+    await expect(page.locator(".reader")).toHaveAttribute("style", /--m: 56/);
     await fitsWidth(page);
+
+    await page.reload();
+    await expect(pages).toHaveAttribute("data-align", "left");
+    await expect.poll(size).toBe(before + 4);
+
+    await tapAt(page, 0.5, 0.05);
+    await page.getByTitle("Оформление").click();
+    await panel.getByRole("button", { name: "Сбросить настройки" }).click();
+    await expect.poll(size).toBe(before);
   });
 });

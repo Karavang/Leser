@@ -10,7 +10,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { lang } from "./i18n.js";
 import { applyTheme, theme } from "./theme.js";
-import { canOffline, isOffline, subscribe, tellWorker } from "./offline.js";
+import { canOffline, checkNetwork, isOffline, subscribe, tellWorker } from "./offline.js";
 import { sendUnsent } from "./sync.js";
 
 // Язык страницы — не только для порядка: от него зависят переносы, проверка
@@ -31,6 +31,7 @@ window.addEventListener("beforeinstallprompt", (e) => {
   window.dispatchEvent(new Event("installable"));
 });
 tellWorker();
+checkNetwork(true);
 if (canOffline) navigator.storage?.persist?.();
 sendUnsent();
 window.addEventListener("online", sendUnsent);

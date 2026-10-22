@@ -1,37 +1,24 @@
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Auth from "./components/auth/Auth";
 import { Reader } from "./components/Reader";
 import UserPage from "./components/UserPage";
 import "./App.scss";
 import { Home } from "./Home";
 import { t } from "./i18n";
-import { dismissSlow, setOffline, useOffline } from "./offline";
+import { useOffline } from "./offline";
 
-const OfflineBar = () => {
+const NET_TEXT = { offline: "offlineMode", checking: "netChecking", back: "netBack" };
+
+const NetStatus = () => {
   const state = useOffline();
-  if (state === "offline") {
-    return (
-      <div className="offlineBar">
-        {t("offlineMode")}
-        <button onClick={() => setOffline(false)}>{t("goOnline")}</button>
-      </div>
-    );
-  }
-  if (state === "slow") {
-    return (
-      <div className="offlineBar">
-        {t("slowNetwork")}
-        <button onClick={() => setOffline(true)}>{t("goOffline")}</button>
-        <button
-          aria-label={t("close")}
-          onClick={dismissSlow}
-        >
-          ✕
-        </button>
-      </div>
-    );
-  }
-  return null;
+  const { pathname } = useLocation();
+  if (!state || (state === "offline" && pathname.startsWith("/book/"))) return null;
+  return (
+    <div className={`offlineBar ${state}`} role="status" aria-live="polite">
+      <i />
+      {t(NET_TEXT[state])}
+    </div>
+  );
 };
 
 /// Заслон перед всем, что требует токена. Без него выход из аккаунта оставлял
@@ -45,7 +32,7 @@ const RequireAuth = () => {
 function App() {
   return (
     <>
-      <OfflineBar />
+      <NetStatus />
       <Routes>
         <Route
           path="/login"

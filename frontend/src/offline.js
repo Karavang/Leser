@@ -2,11 +2,17 @@ import axios from "axios";
 import { useSyncExternalStore } from "react";
 
 const KEY = "offlineMode";
-// ponytail: fixed threshold; derive it from past response times if it misfires
-const SLOW = 4000;
+// ponytail: fixed timings; derive them from past response times if they misfire
+const SLOW = 2500;
+const GRACE = 15000;
+const PROBE_EVERY = 3000;
+const RETRY_EVERY = 10000;
+const PROBE_TIMEOUT = 5000;
 const listeners = new Set();
-let slow = false;
-let dismissed = false;
+let net = "";
+let lostAt = 0;
+let timer;
+let probing = false;
 
 export const canOffline = "serviceWorker" in navigator;
 
@@ -19,7 +25,7 @@ export const subscribe = (listener) => {
   return () => listeners.delete(listener);
 };
 
-const state = () => (isOffline() ? "offline" : slow ? "slow" : "");
+const state = () => (isOffline() ? "offline" : net);
 
 export const useOffline = () => useSyncExternalStore(subscribe, state);
 
@@ -31,29 +37,66 @@ export const tellWorker = () => {
   }
 };
 
-export const setOffline = (on) => {
+const setMode = (on) => {
   if (on) localStorage.setItem(KEY, "1");
   else localStorage.removeItem(KEY);
-  slow = false;
   tellWorker();
+};
+
+const show = (next) => {
+  net = next;
   emit();
 };
 
-export const dismissSlow = () => {
-  dismissed = true;
-  slow = false;
-  emit();
-};
-
-const offer = () => {
-  if (canOffline && !isOffline() && !dismissed && !slow) {
-    slow = true;
-    emit();
+const probe = async () => {
+  const abort = new AbortController();
+  const stop = setTimeout(() => abort.abort(), PROBE_TIMEOUT);
+  try {
+    return (await fetch("/api/health", { cache: "no-store", signal: abort.signal })).ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(stop);
   }
 };
 
+export const checkNetwork = async (now = false) => {
+  if (!canOffline || probing) return;
+  probing = true;
+  clearTimeout(timer);
+  const up = await probe();
+  probing = false;
+  if (up) {
+    lostAt = 0;
+    if (isOffline()) {
+      setMode(false);
+      show("back");
+      setTimeout(() => net === "back" && show(""), 3000);
+    } else if (net === "checking") show("");
+    return;
+  }
+  if (isOffline()) {
+    timer = setTimeout(checkNetwork, RETRY_EVERY);
+    return;
+  }
+  lostAt ||= Date.now();
+  if (now || Date.now() - lostAt >= GRACE) {
+    lostAt = 0;
+    setMode(true);
+    show("");
+    timer = setTimeout(checkNetwork, RETRY_EVERY);
+    return;
+  }
+  show("checking");
+  timer = setTimeout(checkNetwork, PROBE_EVERY);
+};
+
+const suspect = () => {
+  if (!isOffline() && net !== "checking") checkNetwork();
+};
+
 axios.interceptors.request.use((config) => {
-  if (!config.patient) config.slowTimer = setTimeout(offer, SLOW);
+  if (!config.patient) config.slowTimer = setTimeout(suspect, SLOW);
   return config;
 });
 axios.interceptors.response.use(
@@ -63,11 +106,15 @@ axios.interceptors.response.use(
   },
   (error) => {
     clearTimeout(error.config?.slowTimer);
-    if (!error.response && !axios.isCancel(error)) offer();
+    if (!error.response && !axios.isCancel(error)) suspect();
     return Promise.reject(error);
   },
 );
-window.addEventListener("offline", offer);
+window.addEventListener("offline", suspect);
+window.addEventListener("online", () => checkNetwork());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && isOffline()) checkNetwork();
+});
 
 export const downloadedIds = async () => {
   if (!window.caches) return new Set();

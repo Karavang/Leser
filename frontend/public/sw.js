@@ -95,7 +95,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(request, request, SHELL));
   } else if (url.pathname.startsWith("/api/img/")) {
     event.respondWith(cacheFirst(request, url.pathname, API));
-  } else if (url.pathname.startsWith("/api/") && url.pathname !== "/api/export") {
+  } else if (url.pathname.startsWith("/api/") && url.pathname !== "/api/export" && url.pathname !== "/api/health") {
     event.respondWith(respond(request, request, API));
   }
 });
