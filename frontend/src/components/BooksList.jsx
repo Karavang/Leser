@@ -89,7 +89,6 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
                   <h2>{book.title}</h2>
                   <h3>
                     {book.author}
-                    <span className="bookExt">{book.ext}</span>
                   </h3>
                 </>
               )}

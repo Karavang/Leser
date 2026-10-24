@@ -247,7 +247,10 @@ export const Reader = () => {
     const v = view.current;
     if (!v || !v.clientWidth) return;
     const step = v.clientWidth;
-    const n = Math.max(1, Math.round(v.scrollWidth / step));
+    v.style.setProperty("--end", "0px");
+    // ponytail: ceil, not round — a half-filled last spread on ultrawide gives ~1.49 and round dropped it; 0.02 absorbs subpixel overflow
+    const n = Math.max(1, Math.ceil(v.scrollWidth / step - 0.02));
+    v.style.setProperty("--end", `${n * step}px`);
     if (rate.current.step !== step) rate.current = { basis: 0, perChar: 0, step };
     const want = aim.current;
     aim.current = null;
@@ -553,22 +556,35 @@ export const Reader = () => {
           ))}
         </div>
       </div>
-      <label className="lookRow">
+      <div className="lookRow">
         <span>
           {t("lookSize")} · {look.size}px
         </span>
         <div className="lookSize">
-          <small>A</small>
+          <button
+            aria-label={`${t("lookSize")} −`}
+            disabled={look.size <= SIZE[0]}
+            onClick={() => set("size", Math.max(SIZE[0], look.size - 1))}
+          >
+            <small>A</small>
+          </button>
           <input
             type="range"
+            aria-label={t("lookSize")}
             min={SIZE[0]}
             max={SIZE[1]}
             value={look.size}
             onChange={(e) => set("size", Number(e.target.value))}
           />
-          <big>A</big>
+          <button
+            aria-label={`${t("lookSize")} +`}
+            disabled={look.size >= SIZE[1]}
+            onClick={() => set("size", Math.min(SIZE[1], look.size + 1))}
+          >
+            <big>A</big>
+          </button>
         </div>
-      </label>
+      </div>
       <div className="lookRow">
         <span>{t("lookFont")}</span>
         {seg("family", Object.keys(FAMILIES), (f) => (

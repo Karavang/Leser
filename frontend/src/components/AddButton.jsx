@@ -10,10 +10,7 @@ export const AddButton = ({ onAdded }) => {
       <button
         className="filtrationAndAdd"
         title={t("addBooks")}
-        onClick={() => {
-          setIsAddModal(true);
-          document.body.style.overflowY = "hidden";
-        }}
+        onClick={() => setIsAddModal(true)}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

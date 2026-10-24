@@ -65,10 +65,7 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
     };
   }, []);
 
-  const close = () => {
-    setIsAddModal(false);
-    document.body.style.overflowY = "scroll";
-  };
+  const close = () => setIsAddModal(false);
 
   const patch = (id, fields) =>
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...fields } : i)));

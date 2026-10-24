@@ -56,6 +56,10 @@ body {
 
   font-family: "Roboto Mono", serif;
 }
+// ponytail: one CSS rule locks page scroll for every open modal; no JS bookkeeping, browsers without :has just keep scrolling
+html:has(dialog[open], [role="dialog"]) {
+  overflow: hidden;
+}
 // Поля и кнопки цвет текста не наследуют — без этого в ночной теме
 // в них остаётся чёрный по чёрному.
 input,
@@ -266,6 +270,16 @@ li {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+  // ponytail: column overflow ignores the right margin, so the last page could not scroll far enough and lost its right padding; this marker stretches the scroll area to exactly n pages (--end is set in measure)
+  &::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    left: calc(var(--end, 0px) - 1px);
+  }
 }
 .readerPages {
   height: 100%;
@@ -722,6 +736,25 @@ li {
       flex: 1;
       height: 28px;
       accent-color: var(--back-orange);
+    }
+    button {
+      display: grid;
+      place-items: center;
+      min-width: calc(40px * var(--ui, 1));
+      min-height: calc(40px * var(--ui, 1));
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      background: none;
+      color: inherit;
+      cursor: pointer;
+      &:hover:not(:disabled) {
+        background: color-mix(in srgb, currentColor 10%, transparent);
+      }
+      &:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
     }
     small {
       font-size: calc(13px * var(--ui, 1));
@@ -2003,8 +2036,7 @@ li {
 }
 
 .sideNav,
-.bottomNav,
-.bookExt {
+.bottomNav {
   display: none;
 }
 
@@ -2057,12 +2089,6 @@ li {
         color: var(--ink);
         font-weight: 700;
       }
-    }
-  }
-  .bookExt {
-    display: inline;
-    &::before {
-      content: " · ";
     }
   }
   .bookList ul {
