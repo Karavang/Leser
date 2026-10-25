@@ -57,7 +57,7 @@ body {
   font-family: "Roboto Mono", serif;
 }
 // ponytail: one CSS rule locks page scroll for every open modal; no JS bookkeeping, browsers without :has just keep scrolling
-html:has(dialog[open], [role="dialog"]) {
+html:has(:modal) {
   overflow: hidden;
 }
 // Поля и кнопки цвет текста не наследуют — без этого в ночной теме
@@ -1368,7 +1368,7 @@ li {
       }
     }
 
-    ul {
+    ul:not(.wordList) {
       list-style: none;
       margin: 2rem 0;
       display: grid;
@@ -1403,7 +1403,7 @@ li {
     @media (max-width: 768px) {
       max-height: none;
       overflow: visible;
-      ul {
+      ul:not(.wordList) {
         max-height: none;
         overflow: visible;
       }
@@ -1422,7 +1422,7 @@ li {
     .userDetails {
       padding: 1.5rem;
 
-      ul {
+      ul:not(.wordList) {
         grid-template-columns: 1fr;
       }
     }
@@ -1557,6 +1557,9 @@ li {
 
   .detailsBody {
     padding: 24px;
+    @media (max-width: 480px) {
+      padding: 16px;
+    }
   }
 
   h2 {
@@ -1582,6 +1585,8 @@ li {
     }
     dd {
       margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
       font-size: 0.875rem;
     }
   }
@@ -1597,12 +1602,13 @@ li {
 
   .detailsActions {
     display: flex;
-    justify-content: space-between;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
 
     button {
-      height: 32px;
-      padding: 0 16px;
+      flex: 1 1 auto;
+      min-height: 36px;
+      padding: 4px 16px;
       border: none;
       border-radius: 3px;
       cursor: pointer;
@@ -1615,7 +1621,6 @@ li {
       }
     }
 
-    // Удаление намеренно выглядит иначе, чем «Закрыть», и стоит с другого края.
     .deleteBook {
       border: 1px solid var(--danger);
       color: var(--danger);
@@ -1820,8 +1825,9 @@ li {
     // карточки книг выше по файлу — не про этот список: здесь строки
     li {
       display: flex;
+      flex-wrap: wrap;
       align-items: baseline;
-      gap: 12px;
+      gap: 4px 12px;
       padding: 8px 0;
       list-style-type: none;
       background: none;
@@ -1834,11 +1840,14 @@ li {
       }
 
       b {
-        flex: none;
-        min-width: 140px;
+        flex: 0 1 auto;
+        min-width: min(140px, 100%);
+        overflow-wrap: anywhere;
       }
       span {
-        flex: 1;
+        flex: 1 1 8rem;
+        min-width: 0;
+        overflow-wrap: anywhere;
         color: var(--dim);
         font-size: 0.85rem;
       }
@@ -1849,6 +1858,7 @@ li {
   blockquote > button,
   .wordList button {
     flex: none;
+    margin-left: auto;
     border: none;
     background: none;
     color: var(--dim);
@@ -1923,7 +1933,7 @@ li {
   ul {
     display: grid;
     gap: 8px;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   }
 
   li {
@@ -1987,7 +1997,7 @@ li {
   }
   > div {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
     gap: 12px;
   }
   button {

@@ -248,8 +248,8 @@ export const Reader = () => {
     if (!v || !v.clientWidth) return;
     const step = v.clientWidth;
     v.style.setProperty("--end", "0px");
-    // ponytail: ceil, not round — a half-filled last spread on ultrawide gives ~1.49 and round dropped it; 0.02 absorbs subpixel overflow
-    const n = Math.max(1, Math.ceil(v.scrollWidth / step - 0.02));
+    // ponytail: ceil, not round — a half-filled last spread on ultrawide gives ~1.49 and round dropped it; 2px absorbs subpixel overflow
+    const n = Math.max(1, Math.ceil((v.scrollWidth - 2) / step));
     v.style.setProperty("--end", `${n * step}px`);
     if (rate.current.step !== step) rate.current = { basis: 0, perChar: 0, step };
     const want = aim.current;
@@ -564,7 +564,7 @@ export const Reader = () => {
           <button
             aria-label={`${t("lookSize")} −`}
             disabled={look.size <= SIZE[0]}
-            onClick={() => set("size", Math.max(SIZE[0], look.size - 1))}
+            onClick={() => set("size", clamp(SIZE[0], look.size - 1, SIZE[1]))}
           >
             <small>A</small>
           </button>
@@ -579,7 +579,7 @@ export const Reader = () => {
           <button
             aria-label={`${t("lookSize")} +`}
             disabled={look.size >= SIZE[1]}
-            onClick={() => set("size", Math.min(SIZE[1], look.size + 1))}
+            onClick={() => set("size", clamp(SIZE[0], look.size + 1, SIZE[1]))}
           >
             <big>A</big>
           </button>
