@@ -16,7 +16,7 @@
   --card: #f5ecd7;
   --field: rgba(255, 255, 255, 0.5);
   --ink: #2b2415;
-  --dim: #7a6c48;
+  --dim: #5f5234;
   --line: #bfbfbf;
   // блик, бегущий по скелету загрузки
   --gleam: rgba(255, 255, 255, 0.35);
@@ -28,7 +28,7 @@
   --card: #ffffff;
   --field: rgba(255, 255, 255, 0.7);
   --ink: #1b1b1b;
-  --dim: #8a8177;
+  --dim: #6f675e;
   --line: #cfccc4;
 }
 
@@ -38,7 +38,7 @@
   --card: #1b2028;
   --field: rgba(255, 255, 255, 0.07);
   --ink: #c7c2b6;
-  --dim: #6a7280;
+  --dim: #8a919c;
   --line: #333b47;
   --gleam: rgba(255, 255, 255, 0.06);
   --ok: #6dbf73;
@@ -233,6 +233,9 @@ li {
   &.night {
     background: #12161c;
   }
+  &.auto {
+    background: linear-gradient(135deg, #ded09f 50%, #12161c 50%);
+  }
   &.active {
     outline: 2px solid var(--back-orange);
     outline-offset: 1px;
@@ -261,6 +264,7 @@ li {
   min-height: 0;
   display: flex;
   align-items: stretch;
+  justify-content: center;
 }
 // scroll-behavior: smooth здесь стоять не может: у элемента с overflow:hidden
 // Chrome такую прокрутку просто не выполняет — scrollLeft остаётся прежним,
@@ -271,6 +275,10 @@ li {
   min-width: 0;
   overflow: hidden;
   position: relative;
+  container-type: inline-size;
+  max-width: calc(2 * var(--measure, 66ch) + 4 * var(--pad));
+  font-size: var(--fs);
+  font-family: var(--ff, serif);
   // ponytail: column overflow ignores the right margin, so the last page could not scroll far enough and lost its right padding; this marker stretches the scroll area to exactly n pages (--end is set in measure)
   &::after {
     content: "";
@@ -285,16 +293,21 @@ li {
   height: 100%;
   box-sizing: border-box;
   padding: calc(var(--v, 24) * 1px) 0;
-  margin: 0 var(--pad);
+  --n: 1;
+  // ponytail: --measure caps a column at ~66 characters, the rest of a wide window goes into margins
+  --edge: max(var(--pad), (100cqw - var(--n) * var(--measure, 66ch)) / (2 * var(--n)));
+  margin: 0 var(--edge);
   // Одна колонка — обязательно: без column-count это обычный блок, и текст
   // не переносится на соседнюю страницу, а просто обрезается по высоте.
   column-count: 1;
   // ponytail: WebKit treats a bare column-count: 1 as no columns at all, so the book became one endless page on iPhone; column-width: 1px forces a real multicol box. Drop it if Safari ever fragments single columns.
   column-width: 1px;
   // разрыв между колонками = два поля: так между страницами не остаётся щели
-  column-gap: calc(var(--pad) * 2);
+  column-gap: calc(var(--edge) * 2);
   column-fill: auto;
   font: 400 var(--fs) / var(--lh, 1.55) var(--ff, serif);
+  letter-spacing: var(--ls, 0);
+  word-spacing: var(--ws, 0);
   text-align: justify;
   hyphens: auto;
   overflow-wrap: break-word;
@@ -304,16 +317,18 @@ li {
   &[data-hyph="off"] {
     hyphens: manual;
   }
+  // ponytail: auto spread only when both columns still fit ~55 characters; 118ch is measured in the book font of .readerViewport
+  @container (min-width: 118ch) {
+    column-count: 2;
+    --n: 2;
+  }
   &[data-cols="1"] {
     column-count: 1;
+    --n: 1;
   }
   &[data-cols="2"] {
     column-count: 2;
-  }
-
-  // на широком экране одна строка через всё окно нечитаема — разворот на две
-  @media (min-width: 900px) {
-    column-count: 2;
+    --n: 2;
   }
 
   p {
@@ -374,6 +389,9 @@ li {
     max-height: 100%;
     margin: 0.8em auto;
     break-inside: avoid;
+  }
+  :root.night & img {
+    filter: brightness(0.85);
   }
   // Код, таблицы и списки приезжают в основном из markdown и html.
   // В колонку шириной в полэкрана они не влезают сами по себе: длинная
@@ -723,6 +741,9 @@ li {
       &.night {
         background: #12161c;
       }
+      &.auto {
+        background: linear-gradient(135deg, #ded09f 50%, #12161c 50%);
+      }
       &.active {
         outline-offset: -3px;
       }
@@ -815,7 +836,8 @@ li {
   }
 }
 @media (max-width: 600px) {
-  .readerLook .lookRow.cols {
+  .readerLook .lookRow.cols,
+  .readerLook .lookRow.measure {
     display: none;
   }
 }

@@ -59,6 +59,9 @@ const FAMILIES = {
 const LEADING = [1.3, 1.55, 1.8, 2.1];
 const MARGIN = [8, 16, 32, 56];
 const VMARGIN = [8, 24, 48];
+const TRACKING = [0, 0.05, 0.12];
+const WORDS = [0, 0.16];
+const MEASURE = [55, 66, 0];
 
 const freshLook = () => ({
   family: "serif",
@@ -70,6 +73,9 @@ const freshLook = () => ({
   hyphens: "on",
   indent: "on",
   cols: "auto",
+  tracking: 0,
+  words: 0,
+  measure: 66,
 });
 
 // ponytail: trusts whatever is in readerLook; a junk value only yields a bad CSS value, reset fixes it
@@ -602,6 +608,22 @@ export const Reader = () => {
         ))}
       </div>
       <div className="lookRow">
+        <span>{t("lookTracking")}</span>
+        {seg("tracking", TRACKING, (v) => (
+          <span style={{ letterSpacing: `${v}em` }}>Aa</span>
+        ))}
+      </div>
+      <div className="lookRow">
+        <span>{t("lookWords")}</span>
+        {seg("words", WORDS, (v) => (
+          <span style={{ wordSpacing: `${v}em` }}>a b</span>
+        ))}
+      </div>
+      <div className="lookRow measure">
+        <span>{t("lookMeasure")}</span>
+        {seg("measure", MEASURE, (v) => (v ? v : "∞"))}
+      </div>
+      <div className="lookRow">
         <span>{t("lookMargin")}</span>
         {seg("margin", MARGIN, (v) => (
           <i className="glyph page" style={{ "--side": `${v / 8}px` }}>
@@ -716,6 +738,14 @@ export const Reader = () => {
         <div
           className="readerViewport"
           ref={view}
+          style={{
+            "--fs": `${look.size}px`,
+            "--lh": look.leading,
+            "--ff": FAMILIES[look.family] ?? FAMILIES.serif,
+            "--ls": `${look.tracking}em`,
+            "--ws": `${look.words}em`,
+            "--measure": look.measure ? `${look.measure}ch` : "100cqw",
+          }}
           onClick={follow}
           onMouseUp={grab}
           onTouchStart={(e) => (touch.current = e.changedTouches[0].clientX)}
@@ -739,11 +769,6 @@ export const Reader = () => {
             data-hyph={look.hyphens}
             data-indent={look.indent}
             data-cols={look.cols}
-            style={{
-              "--fs": `${look.size}px`,
-              "--lh": look.leading,
-              "--ff": FAMILIES[look.family] ?? FAMILIES.serif,
-            }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         </div>
