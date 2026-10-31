@@ -87,10 +87,15 @@ li {
 }
 .bookList {
   padding: 8px 0;
-  .seriesToggle {
+  .listTools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .listTools button {
     height: 32px;
     padding: 0 16px;
-    margin-bottom: 8px;
     border: none;
     border-radius: 3px;
     cursor: pointer;

@@ -7,7 +7,9 @@ const pad = (n) => String(n).padStart(2, "0");
 /// Момент времени с бэка (rfc3339) — в дд.мм.гггг в зоне читателя.
 const stamp = (iso) => {
   const d = new Date(iso);
-  return isNaN(d) ? null : `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+  return isNaN(d)
+    ? null
+    : `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 };
 
 /// Год издания из метаданных книги — строка произвольной формы: бывает "1869",
@@ -26,7 +28,9 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
   const [saved, setSaved] = useState(null);
 
   useEffect(() => {
-    downloadedIds().then((have) => setSaved(have.has(String(book.id)) ? "done" : null));
+    downloadedIds().then((have) =>
+      setSaved(have.has(String(book.id)) ? "done" : null),
+    );
   }, [book.id]);
 
   const save = () => {
@@ -58,7 +62,16 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
           {book.series && (
             <>
               <dt>{t("series")}</dt>
-              <dd>{book.series}</dd>
+              <dd>
+                {book.series}
+                {book.seriesIndex != null && ` #${book.seriesIndex}`}
+              </dd>
+            </>
+          )}
+          {book.genres?.length > 0 && (
+            <>
+              <dt>{t("genres")}</dt>
+              <dd>{book.genres.join(", ")}</dd>
             </>
           )}
           {book.date && (
@@ -147,10 +160,7 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
             </button>
           )}
           {book.canDelete && (
-            <button
-              className="deleteBook"
-              onClick={() => onDelete(book)}
-            >
+            <button className="deleteBook" onClick={() => onDelete(book)}>
               {t("deleteBook")}
             </button>
           )}

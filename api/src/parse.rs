@@ -29,7 +29,7 @@ const DESCRIPTION_MAX: usize = 4000;
 /// SQL-инъекции здесь ни при чём: sqlx отправляет значения отдельно от текста
 /// запроса (`.bind`), сервер БД их как SQL не разбирает вообще. Чистим от того,
 /// что Postgres физически не хранит, и от того, что портит вид списка книг.
-fn clean(s: &str, limit: usize) -> String {
+pub(crate) fn clean(s: &str, limit: usize) -> String {
     let cleaned: String = s
         .chars()
         .filter(|c| {

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
 import { t } from "../i18n";
-import { seriesGroups } from "../series";
+import { seriesGroups, topGenres } from "../classify";
 
 const HOVER = matchMedia("(hover: hover)").matches;
 
@@ -22,10 +22,15 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
   const [details, setDetails] = useState(null);
   const [error, setError] = useState(null);
   const [bySeries, setBySeries] = useState(savedBySeries);
-  const groups = useMemo(
-    () => (bySeries ? seriesGroups(books) : [["", books]]),
-    [books, bySeries],
-  );
+  const [chosenGenre, setGenre] = useState(null);
+  const genres = useMemo(() => topGenres(books), [books]);
+  const genre = genres.includes(chosenGenre) ? chosenGenre : null;
+  const groups = useMemo(() => {
+    const shown = genre
+      ? books.filter((book) => book.genres?.includes(genre))
+      : books;
+    return bySeries ? seriesGroups(shown) : [["", shown]];
+  }, [books, bySeries, genre]);
 
   const toggleSeries = () => {
     const next = !bySeries;
@@ -95,13 +100,25 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
     <div className="bookList">
       {error && <p className="error">{error}</p>}
       {books.length > 0 && (
-        <button
-          className={`seriesToggle ${bySeries ? "on" : ""}`}
-          aria-pressed={bySeries}
-          onClick={toggleSeries}
-        >
-          {t("bySeries")}
-        </button>
+        <div className="listTools">
+          <button
+            className={bySeries ? "on" : ""}
+            aria-pressed={bySeries}
+            onClick={toggleSeries}
+          >
+            {t("bySeries")}
+          </button>
+          {genres.map((g) => (
+            <button
+              key={g}
+              className={genre === g ? "on" : ""}
+              aria-pressed={genre === g}
+              onClick={() => setGenre(genre === g ? null : g)}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
       )}
       {books.length > 0 ? (
         groups.map(([name, group]) => (

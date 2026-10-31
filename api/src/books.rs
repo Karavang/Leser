@@ -26,6 +26,8 @@ pub struct Book {
     lang: Option<String>,
     description: Option<String>,
     series: Option<String>,
+    series_index: Option<f32>,
+    genres: Vec<String>,
     ext: String,
     owner_id: Option<Uuid>,
     /// null у книг, чей владелец удалил аккаунт, — они остаются в библиотеке
@@ -55,7 +57,7 @@ pub const BOOK_EXTS: [&str; 9] = [
     "epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html", "rda",
 ];
 
-const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series,
+const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series, b.series_index, b.genres,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
      (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public, b.public_basis";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
@@ -93,7 +95,7 @@ pub async fn ensure_visible(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<()
 
 /// Название, автор и серия одной строкой: искать надо по всем трём сразу,
 /// а слово из запроса может лежать в любом.
-const HAY: &str = "(b.title || ' ' || b.author || ' ' || coalesce(b.series, ''))";
+const HAY: &str = "(b.title || ' ' || b.author || ' ' || coalesce(b.series, '') || ' ' || array_to_string(b.genres, ' '))";
 
 /// Порог похожести триграмм. 0.5 связывает словоформы («завоеват» с
 /// «завоевывать» — 0.67) и прощает опечатки («гари потер» — 0.6), но ещё
@@ -156,6 +158,8 @@ impl Book {
             "lang": self.lang,
             "desc": self.description,
             "series": self.series,
+            "seriesIndex": self.series_index,
+            "genres": self.genres,
             "ext": self.ext,
             "source": source,
             // ссылка только у внешних: у своей загрузки вести некуда
@@ -644,21 +648,23 @@ async fn store_book(
         }
     }
 
+    let found = crate::enrich::on_upload(
+        &state.http,
+        &meta.title,
+        &meta.author,
+        meta.lang.as_deref(),
+        meta.description.is_none(),
+    )
+    .await;
+
     // Метаданные, файл и разбор — одной транзакцией. Строки без файла (сломала бы
     // читалку) и файла без строки (мусор) не бывает по построению — с S3 это
     // не гарантировалось.
-    if meta.series.is_none() {
-        meta.series =
-            crate::series::on_upload(&state.http, &meta.title, &meta.author, meta.lang.as_deref())
-                .await;
-    }
-
     let mut tx = state.db.begin().await?;
     let (id,): (Uuid,) = sqlx::query_as(
         "insert into books
-             (title, author, published, lang, description, series, ext, owner_id, source_url,
-              series_checked_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) returning id",
+             (title, author, published, lang, description, series, ext, owner_id, source_url)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id",
     )
     .bind(&meta.title)
     .bind(&meta.author)
@@ -671,6 +677,9 @@ async fn store_book(
     .bind(source_url)
     .fetch_one(&mut *tx)
     .await?;
+    if let Some(found) = &found {
+        crate::enrich::apply(&mut *tx, id, found).await?;
+    }
 
     sqlx::query("insert into book_files (book_id, data, sha256) values ($1, $2, $3)")
         .bind(id)
@@ -836,7 +845,8 @@ pub async fn edit_one(
 
     let mut tx = state.db.begin().await?;
     let edited = sqlx::query(
-        "update books set title = $4, author = $5, series = $6
+        "update books set title = $4, author = $5, series = $6,
+             series_index = case when series is distinct from $6 then null else series_index end
          where id = $1 and (owner_id = $2 or $3)",
     )
     .bind(id)
@@ -1140,6 +1150,8 @@ mod tests {
             lang: None,
             description: None,
             series: None,
+            series_index: None,
+            genres: Vec::new(),
             ext: "epub".into(),
             owner_id: owner,
             added_by: owner.map(|_| "vasya".into()),

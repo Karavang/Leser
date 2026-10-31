@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "test": "node src/i18n.check.mjs && node src/series.check.mjs",
+    "test": "node src/i18n.check.mjs && node src/classify.check.mjs",
     "preview": "vite preview",
     "e2e": "playwright test"
   },

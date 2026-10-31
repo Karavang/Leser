@@ -13,6 +13,7 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 mod admin;
 mod auth;
 mod books;
+mod enrich;
 mod images;
 mod legal;
 mod me;
@@ -22,7 +23,6 @@ mod pdf;
 mod rda;
 mod reader;
 mod search;
-mod series;
 mod sources;
 mod tts;
 
@@ -213,7 +213,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         db,
     });
     tokio::spawn(legal::backfill(state.clone()));
-    tokio::spawn(series::backfill(state.clone()));
+    tokio::spawn(enrich::backfill(state.clone()));
     if state.github_token.is_none() {
         tracing::info!("GITHUB_TOKEN не задан — поиск по GitHub выключен");
     }

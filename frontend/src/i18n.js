@@ -42,6 +42,7 @@ export const RU = {
   // карточка книги
   series: "Серия",
   bySeries: "По сериям",
+  genres: "Жанры",
   noSeries: "Без серии",
   published: "Издана",
   language: "Язык",
@@ -235,6 +236,7 @@ export const EN = {
 
   series: "Series",
   bySeries: "By series",
+  genres: "Genres",
   noSeries: "No series",
   published: "Published",
   language: "Language",
@@ -421,6 +423,7 @@ export const UK = {
 
   series: "Серія",
   bySeries: "За серіями",
+  genres: "Жанри",
   noSeries: "Без серії",
   published: "Видано",
   language: "Мова",
@@ -606,6 +609,7 @@ export const PL = {
 
   series: "Cykl",
   bySeries: "Według cyklu",
+  genres: "Gatunki",
   noSeries: "Bez cyklu",
   published: "Wydana",
   language: "Język",
@@ -791,6 +795,7 @@ export const DE = {
 
   series: "Reihe",
   bySeries: "Nach Reihe",
+  genres: "Genres",
   noSeries: "Ohne Reihe",
   published: "Erschienen",
   language: "Sprache",
