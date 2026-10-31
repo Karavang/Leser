@@ -1,10 +1,19 @@
 import axios from "axios";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
 import { t } from "../i18n";
+import { seriesGroups } from "../series";
 
 const HOVER = matchMedia("(hover: hover)").matches;
+
+const savedBySeries = () => {
+  try {
+    return localStorage.getItem("bySeries") === "1";
+  } catch {
+    return false;
+  }
+};
 
 export const BooksList = ({ books, onDeleted, onChange }) => {
   const navigate = useNavigate();
@@ -12,6 +21,21 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
   const [isEnter, setEnter] = useState(null);
   const [details, setDetails] = useState(null);
   const [error, setError] = useState(null);
+  const [bySeries, setBySeries] = useState(savedBySeries);
+  const groups = useMemo(
+    () => (bySeries ? seriesGroups(books) : [["", books]]),
+    [books, bySeries],
+  );
+
+  const toggleSeries = () => {
+    const next = !bySeries;
+    setBySeries(next);
+    try {
+      localStorage.setItem("bySeries", next ? "1" : "0");
+    } catch {
+      return;
+    }
+  };
   const token = JSON.parse(localStorage.getItem("token"));
 
   // Право на удаление считает бэк (canDelete): своя книга либо админ.
@@ -70,60 +94,74 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
   return (
     <div className="bookList">
       {error && <p className="error">{error}</p>}
+      {books.length > 0 && (
+        <button
+          className={`seriesToggle ${bySeries ? "on" : ""}`}
+          aria-pressed={bySeries}
+          onClick={toggleSeries}
+        >
+          {t("bySeries")}
+        </button>
+      )}
       {books.length > 0 ? (
-        <ul>
-          {books.map((book) => (
-            <li
-              key={book.id}
-              onMouseEnter={() => HOVER && setEnter(book.id)}
-              onMouseLeave={() => HOVER && setEnter(null)}
-              onClick={() => navigate(`/book/${book.id}`)}
-            >
-              {/* Карточка — название и автор, дальше подробности. Даты тут
+        groups.map(([name, group]) => (
+          <section key={name.toLowerCase()}>
+            {bySeries && (
+              <h2 className="seriesTitle">{name || t("noSeries")}</h2>
+            )}
+            <ul>
+              {group.map((book) => (
+                <li
+                  key={book.id}
+                  onMouseEnter={() => HOVER && setEnter(book.id)}
+                  onMouseLeave={() => HOVER && setEnter(null)}
+                  onClick={() => navigate(`/book/${book.id}`)}
+                >
+                  {/* Карточка — название и автор, дальше подробности. Даты тут
                   не место: в метаданных она произвольной формы и въезжала
                   на карточку сырой строкой вида 2015-06-15T00:00:00+00:00. */}
-              {isEnter === book.id ? (
-                <p>{book.desc}</p>
-              ) : (
-                <>
-                  <h2>{book.title}</h2>
-                  <h3>
-                    {book.author}
-                  </h3>
-                </>
-              )}
-              <div className="bookFooter">
-                {(isEnter === book.id || !HOVER) && (
-                  <button
-                    className="detailsButton"
-                    title={t("more")}
-                    aria-label={t("more")}
-                    onClick={(e) => {
-                      // иначе клик дойдёт до li и откроет читалку
-                      e.stopPropagation();
-                      setDetails(book);
-                    }}
-                  >
-                    {HOVER ? t("more") : "⋯"}
-                  </button>
-                )}
-                {/* Видно всегда, а не по наведению: по этой отметке и понятно,
+                  {isEnter === book.id ? (
+                    <p>{book.desc}</p>
+                  ) : (
+                    <>
+                      <h2>{book.title}</h2>
+                      <h3>{book.author}</h3>
+                    </>
+                  )}
+                  <div className="bookFooter">
+                    {(isEnter === book.id || !HOVER) && (
+                      <button
+                        className="detailsButton"
+                        title={t("more")}
+                        aria-label={t("more")}
+                        onClick={(e) => {
+                          // иначе клик дойдёт до li и откроет читалку
+                          e.stopPropagation();
+                          setDetails(book);
+                        }}
+                      >
+                        {HOVER ? t("more") : "⋯"}
+                      </button>
+                    )}
+                    {/* Видно всегда, а не по наведению: по этой отметке и понятно,
                     какие книги у читателя свои. */}
-                <button
-                  className={`shelfButton ${book.mine ? "on" : ""}`}
-                  title={book.mine ? t("shelfRemove") : t("shelfAdd")}
-                  aria-pressed={book.mine}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    shelve(book);
-                  }}
-                >
-                  {book.mine ? "★" : "☆"}
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                    <button
+                      className={`shelfButton ${book.mine ? "on" : ""}`}
+                      title={book.mine ? t("shelfRemove") : t("shelfAdd")}
+                      aria-pressed={book.mine}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        shelve(book);
+                      }}
+                    >
+                      {book.mine ? "★" : "☆"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
       ) : (
         <p>{t("noBooks")}</p>
       )}

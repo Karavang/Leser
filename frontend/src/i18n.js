@@ -41,6 +41,8 @@ export const RU = {
 
   // карточка книги
   series: "Серия",
+  bySeries: "По сериям",
+  noSeries: "Без серии",
   published: "Издана",
   language: "Язык",
   source: "Источник",
@@ -232,6 +234,8 @@ export const EN = {
   shelfFailed: "Could not update “my books”",
 
   series: "Series",
+  bySeries: "By series",
+  noSeries: "No series",
   published: "Published",
   language: "Language",
   source: "Source",
@@ -416,6 +420,8 @@ export const UK = {
   shelfFailed: "Не вдалося змінити «мої книжки»",
 
   series: "Серія",
+  bySeries: "За серіями",
+  noSeries: "Без серії",
   published: "Видано",
   language: "Мова",
   source: "Джерело",
@@ -599,6 +605,8 @@ export const PL = {
   shelfFailed: "Nie udało się zmienić „moich książek”",
 
   series: "Cykl",
+  bySeries: "Według cyklu",
+  noSeries: "Bez cyklu",
   published: "Wydana",
   language: "Język",
   source: "Źródło",
@@ -782,6 +790,8 @@ export const DE = {
   shelfFailed: "„Meine Bücher“ konnten nicht geändert werden",
 
   series: "Reihe",
+  bySeries: "Nach Reihe",
+  noSeries: "Ohne Reihe",
   published: "Erschienen",
   language: "Sprache",
   source: "Quelle",

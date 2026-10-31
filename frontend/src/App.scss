@@ -87,6 +87,26 @@ li {
 }
 .bookList {
   padding: 8px 0;
+  .seriesToggle {
+    height: 32px;
+    padding: 0 16px;
+    margin-bottom: 8px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--ink);
+    background: var(--field);
+    &.on {
+      color: var(--on-accent);
+      background-color: var(--back-orange);
+    }
+  }
+  .seriesTitle {
+    margin: 8px 0;
+    color: var(--ink);
+    font-size: 1.25rem;
+  }
   ul {
     display: flex;
     flex-wrap: wrap;
