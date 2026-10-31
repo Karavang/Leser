@@ -14,7 +14,7 @@ pub struct Person {
     langs: Vec<String>,
 }
 
-fn authors(field: &str) -> Vec<String> {
+pub fn authors(field: &str) -> Vec<String> {
     let mut field = field.to_string();
     for joint in [" и ", " і ", " i ", " and ", " und ", "&", ";"] {
         field = field.replace(joint, ",");
@@ -45,6 +45,14 @@ pub fn verdict(found: &[Vec<Person>], lang: &str, year: i32) -> Option<String> {
             .collect::<Vec<_>>()
             .join(", ")
     })
+}
+
+pub fn lang_code(lang: Option<&str>) -> String {
+    lang.unwrap_or_default()
+        .to_lowercase()
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .collect()
 }
 
 async fn people(http: &reqwest::Client, name: &str, lang: &str) -> reqwest::Result<Vec<Person>> {
@@ -100,12 +108,7 @@ pub async fn check(state: Arc<AppState>, id: Uuid) {
             Err(e) => return tracing::warn!("legal check of {id}: {e}"),
         };
     let Some((author, lang)) = row else { return };
-    let lang: String = lang
-        .unwrap_or_default()
-        .to_lowercase()
-        .chars()
-        .take_while(char::is_ascii_alphabetic)
-        .collect();
+    let lang = lang_code(lang.as_deref());
 
     let mut found = Vec::new();
     if lang.len() == 2 {

@@ -647,11 +647,18 @@ async fn store_book(
     // Метаданные, файл и разбор — одной транзакцией. Строки без файла (сломала бы
     // читалку) и файла без строки (мусор) не бывает по построению — с S3 это
     // не гарантировалось.
+    if meta.series.is_none() {
+        meta.series =
+            crate::series::on_upload(&state.http, &meta.title, &meta.author, meta.lang.as_deref())
+                .await;
+    }
+
     let mut tx = state.db.begin().await?;
     let (id,): (Uuid,) = sqlx::query_as(
         "insert into books
-             (title, author, published, lang, description, series, ext, owner_id, source_url)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id",
+             (title, author, published, lang, description, series, ext, owner_id, source_url,
+              series_checked_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) returning id",
     )
     .bind(&meta.title)
     .bind(&meta.author)
