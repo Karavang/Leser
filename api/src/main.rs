@@ -11,6 +11,7 @@ use sqlx::postgres::PgPoolOptions;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 mod admin;
+mod audio;
 mod auth;
 mod books;
 mod enrich;
@@ -24,6 +25,7 @@ mod rda;
 mod reader;
 mod search;
 mod sources;
+mod tags;
 mod tts;
 
 // ponytail: Cloudflare rejects request bodies over 100 MB on the free plan, so file uploads cap at 90 MiB.
@@ -260,6 +262,16 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .route("/words/{id}", delete(me::delete_word))
         .route("/stats", get(me::stats))
         .route("/export", get(me::export))
+        .route("/listen/{filename}", get(audio::listen))
+        .route("/audio/{id}/{idx}", get(audio::stream))
+        .route("/audio", post(audio::finish))
+        .route("/audio/tracks", post(audio::new_track))
+        .route(
+            "/audio/tracks/{id}",
+            post(audio::put_chunk).layer(DefaultBodyLimit::max(audio::CHUNK + 1024 * 1024)),
+        )
+        .route("/searchAudio", get(audio::search))
+        .route("/importAudio", post(audio::import))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
         .route("/registration", post(auth::registration))

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { BookDetails } from "./BookDetails";
 import { t } from "../i18n";
 import { seriesGroups, topGenres } from "../classify";
+import { bookPath, hoursMinutes, isAudio } from "../audio";
 
 const HOVER = matchMedia("(hover: hover)").matches;
 
@@ -15,7 +16,7 @@ const savedBySeries = () => {
   }
 };
 
-export const BooksList = ({ books, onDeleted, onChange }) => {
+export const BooksList = ({ books, empty, onDeleted, onChange }) => {
   const navigate = useNavigate();
 
   const [isEnter, setEnter] = useState(null);
@@ -132,7 +133,7 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
                   key={book.id}
                   onMouseEnter={() => HOVER && setEnter(book.id)}
                   onMouseLeave={() => HOVER && setEnter(null)}
-                  onClick={() => navigate(`/book/${book.id}`)}
+                  onClick={() => navigate(bookPath(book))}
                 >
                   {/* Карточка — название и автор, дальше подробности. Даты тут
                   не место: в метаданных она произвольной формы и въезжала
@@ -146,6 +147,14 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
                     </>
                   )}
                   <div className="bookFooter">
+                    {isAudio(book) && (
+                      <span className="bookKind" title={t("tabAudio")}>
+                        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 18v-6a8 8 0 0 1 16 0v6M4 14h3v6H4zM17 14h3v6h-3z" />
+                        </svg>
+                        {book.seconds > 0 && t("hoursMinutes", ...hoursMinutes(book.seconds))}
+                      </span>
+                    )}
                     {(isEnter === book.id || !HOVER) && (
                       <button
                         className="detailsButton"
@@ -180,7 +189,7 @@ export const BooksList = ({ books, onDeleted, onChange }) => {
           </section>
         ))
       ) : (
-        <p>{t("noBooks")}</p>
+        <p>{empty ?? t("noBooks")}</p>
       )}
       {details && (
         <BookDetails

@@ -56,6 +56,7 @@ struct QuoteRow {
     created_at: DateTime<Utc>,
     /// null, если книгу успели удалить из библиотеки — цитата остаётся
     book_id: Option<Uuid>,
+    ext: Option<String>,
 }
 
 impl QuoteRow {
@@ -68,13 +69,14 @@ impl QuoteRow {
             "createdAt": self.created_at.to_rfc3339(),
             // есть только пока книга в библиотеке: без неё открывать нечего
             "book": self.book_id,
+            "audio": self.ext.as_deref() == Some(crate::audio::EXT),
         })
     }
 }
 
 const QUOTE_SELECT: &str = "select q.id, q.title, q.text, q.position, q.created_at,
-            q.book_id
-     from quotes q
+            q.book_id, b.ext
+     from quotes q left join books b on b.id = q.book_id
      where q.user_id = $1 order by q.created_at desc";
 
 pub async fn quotes(

@@ -22,12 +22,23 @@ const ALLOWED_HOSTS: &[&str] = &[
     "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "codeload.github.com",
+    "librivox.org",
+    "archive.org",
 ];
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn host_allowed(url: &reqwest::Url) -> bool {
-    url.scheme() == "https" && url.host_str().is_some_and(|h| ALLOWED_HOSTS.contains(&h))
+    url.scheme() == "https"
+        && url.host_str().is_some_and(|h| {
+            ALLOWED_HOSTS.contains(&h)
+                || h.strip_suffix(".archive.org").is_some_and(|sub| {
+                    !sub.is_empty()
+                        && sub
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+                })
+        })
 }
 
 pub fn client() -> Result<reqwest::Client> {
@@ -212,6 +223,211 @@ async fn github(client: &reqwest::Client, q: &str, token: Option<&str>) -> Resul
         .collect())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundAudio {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub seconds: u64,
+    pub lang: Option<String>,
+    pub source: String,
+    pub page_url: String,
+}
+
+pub struct LibriVox {
+    pub title: String,
+    pub author: String,
+    pub lang: Option<String>,
+    pub description: Option<String>,
+    pub page_url: String,
+    pub sections: Vec<Section>,
+}
+
+pub struct Section {
+    pub title: String,
+    pub url: String,
+    pub seconds: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct LvFeed {
+    #[serde(default)]
+    books: Vec<LvBook>,
+}
+
+#[derive(serde::Deserialize)]
+struct LvBook {
+    id: String,
+    title: String,
+    #[serde(default)]
+    language: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    url_librivox: String,
+    #[serde(default)]
+    totaltimesecs: u64,
+    #[serde(default)]
+    authors: Vec<LvAuthor>,
+    #[serde(default)]
+    sections: Vec<LvSection>,
+}
+
+#[derive(serde::Deserialize)]
+struct LvAuthor {
+    #[serde(default)]
+    first_name: String,
+    #[serde(default)]
+    last_name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct LvSection {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    listen_url: String,
+    #[serde(default)]
+    playtime: String,
+}
+
+const LIBRIVOX: &str = "https://librivox.org/api/feed/audiobooks/";
+
+fn lv_author(b: &LvBook) -> String {
+    b.authors
+        .iter()
+        .map(|a| {
+            format!("{} {}", a.first_name.trim(), a.last_name.trim())
+                .trim()
+                .to_string()
+        })
+        .filter(|a| !a.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+pub fn lv_lang(name: &str) -> Option<String> {
+    let code = match name.trim().to_lowercase().as_str() {
+        "english" => "en",
+        "russian" => "ru",
+        "ukrainian" => "uk",
+        "polish" => "pl",
+        "german" => "de",
+        "french" => "fr",
+        "spanish" => "es",
+        "italian" => "it",
+        "dutch" => "nl",
+        "portuguese" => "pt",
+        "latin" => "la",
+        "greek" => "el",
+        "swedish" => "sv",
+        "finnish" => "fi",
+        "danish" => "da",
+        "chinese" => "zh",
+        "japanese" => "ja",
+        "hebrew" => "he",
+        _ => return None,
+    };
+    Some(code.into())
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut inside = false;
+    for c in s.chars() {
+        match c {
+            '<' => inside = true,
+            '>' => inside = false,
+            c if !inside => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+}
+
+async fn lv_query(client: &reqwest::Client, params: &[(&str, &str)]) -> Result<Vec<LvBook>> {
+    let response = client
+        .get(LIBRIVOX)
+        .query(&[("format", "json")])
+        .query(params)
+        .send()
+        .await
+        .map_err(AppError::internal)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Vec::new());
+    }
+    let feed: LvFeed = response
+        .error_for_status()
+        .map_err(AppError::internal)?
+        .json()
+        .await
+        .map_err(AppError::internal)?;
+    Ok(feed.books)
+}
+
+pub async fn librivox(client: &reqwest::Client, q: &str) -> Vec<FoundAudio> {
+    let fields = "{id,title,authors,language,totaltimesecs,url_librivox}";
+    let title = format!("^{q}");
+    let last = q.split_whitespace().last().unwrap_or(q);
+    let by_title = [
+        ("title", title.as_str()),
+        ("limit", "10"),
+        ("fields", fields),
+    ];
+    let by_author = [("author", last), ("limit", "10"), ("fields", fields)];
+    let (by_title, by_author) =
+        tokio::join!(lv_query(client, &by_title), lv_query(client, &by_author),);
+    let mut seen = std::collections::HashSet::new();
+    [by_title, by_author]
+        .into_iter()
+        .filter_map(|r| {
+            r.map_err(|e| tracing::warn!("источник librivox не ответил: {e}"))
+                .ok()
+        })
+        .flatten()
+        .filter(|b| seen.insert(b.id.clone()))
+        .take(12)
+        .map(|b| FoundAudio {
+            author: lv_author(&b),
+            lang: lv_lang(&b.language),
+            seconds: b.totaltimesecs,
+            source: "LibriVox".into(),
+            page_url: b.url_librivox,
+            title: b.title,
+            id: b.id,
+        })
+        .collect()
+}
+
+pub async fn librivox_book(client: &reqwest::Client, id: &str) -> Result<LibriVox> {
+    let book = lv_query(client, &[("id", id), ("extended", "1")])
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::bad("Книга не найдена", "Book not found"))?;
+    let description = strip_tags(&book.description);
+    Ok(LibriVox {
+        author: lv_author(&book),
+        lang: lv_lang(&book.language),
+        description: (!description.trim().is_empty()).then_some(description),
+        page_url: book.url_librivox,
+        title: book.title,
+        sections: book
+            .sections
+            .into_iter()
+            .filter(|s| !s.listen_url.is_empty())
+            .map(|s| Section {
+                seconds: s.playtime.trim().parse().unwrap_or(0.0),
+                title: s.title,
+                url: s.listen_url,
+            })
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +450,10 @@ mod tests {
         assert!(!ok("https://gutenberg.org.evil.com/x.epub"));
         assert!(!ok("https://notgithub.com/x.epub"));
         assert!(!ok("file:///etc/passwd"));
+        assert!(ok("https://www.archive.org/download/x/y.mp3"));
+        assert!(ok("https://ia800300.us.archive.org/0/items/x/y.mp3"));
+        assert!(!ok("https://archive.org.evil.com/x.mp3"));
+        assert!(!ok("https://evilarchive.org/x.mp3"));
+        assert!(!ok("https://.archive.org/x.mp3"));
     }
 }

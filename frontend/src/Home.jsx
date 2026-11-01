@@ -12,6 +12,7 @@ import { BusyLine, Loading } from "./ui/Loading";
 import { expireSession } from "./session";
 import { t } from "./i18n";
 import { downloadedIds, useOffline } from "./offline";
+import { isAudio } from "./audio";
 
 const icon = (d) => (
   <svg
@@ -31,10 +32,13 @@ const icon = (d) => (
 const STAR = icon("M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z");
 const SHELF = icon("M4 5a2 2 0 0 1 2-2h5v18H6a2 2 0 0 1-2-2zM13 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5z");
 const PERSON = icon("M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c1.5-4 4.5-6 8-6s6.5 2 8 6");
+const PHONES = icon("M4 18v-6a8 8 0 0 1 16 0v6M4 14h3v6H4zM17 14h3v6h-3z");
+const ICONS = { mine: STAR, library: SHELF, audio: PHONES };
 
 export const Home = () => {
   const [books, setBooks] = useState([]);
   const [found, setFound] = useState([]);
+  const [heard, setHeard] = useState([]);
   const [filter, setFilter] = useState("");
   const [chosen, setTab] = useState(null);
   const [hasShelf, setHasShelf] = useState(false);
@@ -137,13 +141,39 @@ export const Home = () => {
     };
   }, [reload]);
 
+  useEffect(() => {
+    const q = filter.trim();
+    if (!q || tab !== "audio") {
+      setHeard([]);
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await axios.get("/api/searchAudio", {
+          params: { q },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!stale) setHeard(response.data);
+      } catch {
+        if (!stale) setHeard([]);
+      }
+    }, 400);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [token, filter, tab]);
+
   // Раздел — единственное, что осталось фильтровать на клиенте: mine приходит
   // с бэка вместе с книгой, отдельный запрос ради этого не нужен.
   const shownBooks = useMemo(
     () =>
       tab === "library"
-        ? books
-        : books
+        ? books.filter((book) => !isAudio(book))
+        : tab === "audio"
+          ? books.filter(isAudio)
+          : books
             .filter((book) => book.mine)
             .sort((a, b) =>
               searching ? 0 : (b.readAt ?? "").localeCompare(a.readAt ?? ""),
@@ -153,10 +183,10 @@ export const Home = () => {
   const recent = useMemo(
     () =>
       books
-        .filter((book) => book.readAt)
+        .filter((book) => book.readAt && (tab !== "audio" || isAudio(book)))
         .sort((a, b) => b.readAt.localeCompare(a.readAt))
         .slice(0, 3),
-    [books],
+    [books, tab],
   );
   const pick = (next) => () => {
     setTab(next);
@@ -165,6 +195,7 @@ export const Home = () => {
   const sections = [
     ["mine", t("tabMine")],
     ["library", t("tabLibrary")],
+    ["audio", t("tabAudio")],
   ];
 
   // Список правит себя сам: сервер уже подтвердил удаление, перезапрашивать нечего.
@@ -220,12 +251,13 @@ export const Home = () => {
           ))}
         </div>
       </div>
-      {tab === "mine" && !searching && <ContinueReading books={recent} />}
+      {(tab === "mine" || tab === "audio") && !searching && <ContinueReading books={recent} />}
       {loading ? (
         <Loading />
       ) : (
         <BooksList
           books={shownBooks}
+          empty={tab === "audio" ? t("noAudio") : t("noBooks")}
           onDeleted={onDeleted}
           onChange={onChange}
         />
@@ -233,6 +265,14 @@ export const Home = () => {
       {tab === "library" && (
         <SourceResults
           found={found}
+          onImported={reload}
+        />
+      )}
+      {tab === "audio" && (
+        <SourceResults
+          audio
+          found={heard}
+          books={books}
           onImported={reload}
         />
       )}
@@ -245,7 +285,7 @@ export const Home = () => {
             aria-current={tab === key ? "page" : undefined}
             onClick={pick(key)}
           >
-            {key === "mine" ? STAR : SHELF}
+            {ICONS[key]}
             {label}
           </button>
         ))}

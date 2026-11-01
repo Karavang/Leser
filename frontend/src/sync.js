@@ -9,6 +9,21 @@ const save = (all) => localStorage.setItem(KEY, JSON.stringify(all));
 
 export const unsentPage = (id) => unsentAll()[id];
 
+export const savedSpot = (id) => {
+  const user = JSON.parse(localStorage.getItem("user")) || {};
+  const spot = (user.pages || []).find((p) => p.id === id);
+  const frac = Number.parseFloat(spot?.page);
+  return Number.isFinite(frac) && frac >= 0 && frac < 1 ? frac : 0;
+};
+
+export const rememberSpot = (id, frac) => {
+  const user = JSON.parse(localStorage.getItem("user"));
+  if (!user) return;
+  user.pages = (user.pages || []).filter((p) => p.id !== id);
+  user.pages.push({ id, page: String(frac) });
+  localStorage.setItem("user", JSON.stringify(user));
+};
+
 export const sendPage = (id, page) => {
   const token = JSON.parse(localStorage.getItem("token"));
   if (!token) return Promise.resolve();

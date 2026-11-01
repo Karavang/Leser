@@ -7,6 +7,7 @@ import { AdminPanel } from "./AdminPanel";
 import { LANGS, lang, setLang, t } from "../i18n";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 import { canOffline, downloads, forgetDownload } from "../offline";
+import { bookPath } from "../audio";
 
 /// Сколько дней показывает график. Месяц — это ещё видно на телефоне
 /// и уже достаточно, чтобы отличить «читаю» от «читал когда-то».
@@ -199,7 +200,7 @@ const UserPage = () => {
           {books.map((book) => (
             <li
               key={book.id}
-              onClick={() => navigate(`/book/${book.id}`)}
+              onClick={() => navigate(bookPath(book))}
             >
               <h4>{book.title}</h4>
               <p>{book.author}</p>
@@ -221,7 +222,7 @@ const UserPage = () => {
                 className={q.book ? "goto" : ""}
                 onClick={() =>
                   q.book &&
-                  navigate(`/book/${q.book}?at=${q.position}`)
+                  navigate(bookPath({ id: q.book, audio: q.audio }, q.position))
                 }
                 title={q.book ? t("openAtQuote") : undefined}
               >
@@ -281,7 +282,7 @@ const UserPage = () => {
                 <li key={b.id}>
                   <b
                     className="goto"
-                    onClick={() => navigate(`/book/${b.id}`)}
+                    onClick={() => navigate(bookPath(b))}
                   >
                     {b.title}
                   </b>

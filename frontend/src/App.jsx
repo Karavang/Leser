@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Auth from "./components/auth/Auth";
+import { Listener } from "./components/Listener";
 import { Reader } from "./components/Reader";
 import UserPage from "./components/UserPage";
 import "./App.scss";
@@ -12,7 +13,7 @@ const NET_TEXT = { offline: "offlineMode", checking: "netChecking", back: "netBa
 const NetStatus = () => {
   const state = useOffline();
   const { pathname } = useLocation();
-  if (!state || (state === "offline" && pathname.startsWith("/book/"))) return null;
+  if (!state || (state === "offline" && /^\/(book|listen)\//.test(pathname))) return null;
   return (
     <div className={`offlineBar ${state}`} role="status" aria-live="polite">
       <i />
@@ -50,6 +51,10 @@ function App() {
           <Route
             path="/book/:id"
             element={<Reader />}
+          />
+          <Route
+            path="/listen/:id"
+            element={<Listener />}
           />
         </Route>
         {/* чужой адрес — не ошибка, просто отправляем в библиотеку */}

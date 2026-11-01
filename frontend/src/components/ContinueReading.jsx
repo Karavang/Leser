@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { t } from "../i18n";
+import { bookPath } from "../audio";
 
 export const ContinueReading = ({ books }) => {
   const navigate = useNavigate();
@@ -11,7 +12,7 @@ export const ContinueReading = ({ books }) => {
         {books.map((book) => {
           const percent = Math.round((book.progress ?? 0) * 100);
           return (
-            <button key={book.id} onClick={() => navigate(`/book/${book.id}`)}>
+            <button key={book.id} onClick={() => navigate(bookPath(book))}>
               <b>{book.title}</b>
               <span>{book.author}</span>
               <span className="continueBar">

@@ -2121,7 +2121,7 @@ li {
   }
   .bottomNav {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
@@ -2597,4 +2597,196 @@ li {
 
 .wordList b.goto {
   cursor: pointer;
+}
+
+.bookFooter .bookKind {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.sourceResults .sourceWait {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
+.reader.listener {
+  .readerBar,
+  .readerFoot {
+    position: static;
+    transform: none;
+  }
+  .readerBody {
+    overflow-y: auto;
+  }
+  .readerToc button {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    small {
+      flex: none;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+  }
+}
+
+.listenBody {
+  flex: 0 1 560px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 0 auto;
+  padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+  text-align: center;
+  font-size: calc(14px * var(--ui, 1));
+
+  h1 {
+    margin: 0 0 8px;
+    font: 600 calc(22px * var(--ui, 1)) / 1.3 Georgia, serif;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+.listenPart {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--dim);
+  font-size: calc(12px * var(--ui, 1));
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.listenScrub {
+  width: 100%;
+  accent-color: var(--back-orange);
+}
+
+.listenTimes {
+  width: 100%;
+  margin-top: -8px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--dim);
+  font-size: calc(12px * var(--ui, 1));
+  font-variant-numeric: tabular-nums;
+}
+
+.listenControls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(2px, 2.5vw, 16px);
+  margin: 8px 0;
+
+  button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--dim) 18%, transparent);
+    }
+  }
+  .skip small {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -42%);
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .play {
+    width: 76px;
+    height: 76px;
+    color: var(--on-accent);
+    background: var(--back-orange);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    &:hover:not(:disabled) {
+      background: var(--back-hover);
+    }
+  }
+}
+
+.listenExtras {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--field);
+    font-size: calc(13px * var(--ui, 1));
+    font-variant-numeric: tabular-nums;
+    &.on {
+      border-color: transparent;
+      color: var(--on-accent);
+      background: var(--back-orange);
+    }
+  }
+}
+
+.listenNote input {
+  flex: 1;
+  min-width: 0;
+  width: min(60vw, 320px);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--field);
+  color: var(--ink);
+  font: inherit;
+}
+
+.listenCover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: min(240px, 34vh, 60vw);
+  aspect-ratio: 3 / 4;
+  margin-bottom: 12px;
+  padding: 20px 18px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--on-accent);
+  background: linear-gradient(160deg, var(--back-orange), var(--back-hover));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+
+  b {
+    font: 600 calc(20px * var(--ui, 1)) / 1.2 Georgia, serif;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  span {
+    font-size: calc(12px * var(--ui, 1));
+    opacity: 0.8;
+  }
 }

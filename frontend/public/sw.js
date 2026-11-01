@@ -80,6 +80,30 @@ const networkFirst = async (request, key, name) => {
 const cacheFirst = async (request, key, name) =>
   (await fromCache(key, name)) || fetchAndKeep(request, key, name);
 
+const ranged = async (request, url) => {
+  const cached = await fromCache(url.pathname, API);
+  if (!cached) return fetch(request);
+  const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("Range") || "");
+  if (!range) return cached;
+  const blob = await cached.blob();
+  const size = blob.size;
+  let from = range[1] === "" ? size - Number(range[2]) : Number(range[1]);
+  let to = range[1] === "" || range[2] === "" ? size - 1 : Math.min(Number(range[2]), size - 1);
+  from = Math.max(0, from);
+  if (from > to || from >= size) {
+    return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+  }
+  return new Response(blob.slice(from, to + 1), {
+    status: 206,
+    headers: {
+      "Content-Type": cached.headers.get("Content-Type") || "audio/mpeg",
+      "Content-Length": String(to + 1 - from),
+      "Content-Range": `bytes ${from}-${to}/${size}`,
+      "Accept-Ranges": "bytes",
+    },
+  });
+};
+
 const respond = async (request, key, name) =>
   (await offlineMode()) ? cacheFirst(request, key, name) : networkFirst(request, key, name);
 
@@ -93,6 +117,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(respond(request, "/", SHELL));
   } else if (url.pathname.startsWith("/assets/")) {
     event.respondWith(cacheFirst(request, request, SHELL));
+  } else if (url.pathname.startsWith("/api/audio/")) {
+    event.respondWith(ranged(request, url));
   } else if (url.pathname.startsWith("/api/img/")) {
     event.respondWith(cacheFirst(request, url.pathname, API));
   } else if (url.pathname.startsWith("/api/") && url.pathname !== "/api/export" && url.pathname !== "/api/health") {

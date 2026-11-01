@@ -123,15 +123,33 @@ export const downloadedIds = async () => {
     keys
       .map(
         (request) =>
-          /^\/api\/read\/([^/]+)$/.exec(new URL(request.url).pathname)?.[1],
+          /^\/api\/(?:read\/([^/]+)|audio\/([^/]+)\/done)$/
+            .exec(new URL(request.url).pathname)
+            ?.slice(1)
+            .find(Boolean),
       )
       .filter(Boolean),
   );
 };
 
-export const download = async (id) => {
+const downloadAudio = async (id, auth) => {
+  const { data } = await axios.get(`/api/listen/${id}`, auth);
+  const { data: media } = await axios.get(`/api/imgToken/${id}`, auth);
+  const cache = await caches.open("api");
+  for (const n of data.tracks.keys()) {
+    const path = `/api/audio/${id}/${n}`;
+    if (await cache.match(path)) continue;
+    const response = await fetch(`${path}?t=${media.token}`);
+    if (!response.ok) throw new Error(response.statusText);
+    await cache.put(path, response);
+  }
+  await cache.put(`/api/audio/${id}/done`, new Response(String(data.tracks.length)));
+};
+
+export const download = async (id, audio = false) => {
   const token = JSON.parse(localStorage.getItem("token"));
   const auth = { headers: { Authorization: `Bearer ${token}` }, patient: true };
+  if (audio) return downloadAudio(id, auth);
   const { data } = await axios.get(`/api/read/${id}`, auth);
   const pics = new Set(
     (data.chapters || []).flatMap((c) =>
@@ -150,7 +168,7 @@ export const download = async (id) => {
 };
 
 const bookOf = (request) =>
-  /^\/api\/(?:read|img|imgToken|progress)\/([^/]+)/.exec(new URL(request.url).pathname)?.[1];
+  /^\/api\/(?:read|listen|audio|img|imgToken|progress)\/([^/]+)/.exec(new URL(request.url).pathname)?.[1];
 
 // ponytail: sizes come from reading every cached body; keep a size index if the list grows slow
 export const downloads = async () => {
@@ -174,6 +192,7 @@ export const downloads = async () => {
     size,
     title: titles.get(id)?.title || id,
     author: titles.get(id)?.author || "",
+    ext: titles.get(id)?.ext,
   }));
 };
 

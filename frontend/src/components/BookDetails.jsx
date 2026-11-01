@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { canOffline, download, downloadedIds } from "../offline";
+import { hoursMinutes, isAudio } from "../audio";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -35,7 +36,7 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
 
   const save = () => {
     setSaved("busy");
-    download(book.id)
+    download(book.id, isAudio(book))
       .then(() => setSaved("done"))
       .catch(() => setSaved("failed"));
   };
@@ -59,6 +60,12 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
         <h3>{book.author}</h3>
 
         <dl>
+          {isAudio(book) && book.seconds > 0 && (
+            <>
+              <dt>{t("duration")}</dt>
+              <dd>{t("hoursMinutes", ...hoursMinutes(book.seconds))}</dd>
+            </>
+          )}
           {book.series && (
             <>
               <dt>{t("series")}</dt>

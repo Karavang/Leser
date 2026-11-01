@@ -41,6 +41,7 @@ pub struct Book {
     read_pos: Option<String>,
     public: bool,
     public_basis: Option<String>,
+    seconds: Option<f64>,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -59,7 +60,8 @@ pub const BOOK_EXTS: [&str; 9] = [
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series, b.series_index, b.genres,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
-     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public, b.public_basis";
+     (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public, b.public_basis,
+     (select sum(t.seconds)::float8 from audio_tracks t where t.book_id = b.id) as seconds";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
 const BOOK_FROM: &str = "from books b
      left join users u on u.id = b.owner_id
@@ -177,6 +179,7 @@ impl Book {
             "public": self.public,
             "publicBasis": self.public_basis,
             "canPublish": user.admin,
+            "seconds": self.seconds,
         })
     }
 }
@@ -643,7 +646,7 @@ async fn store_book(
     let (doc, imgs) = crate::images::extract(doc);
 
     if !force {
-        if let Some(id) = similar_book(&state.db, owner, &meta.title, &meta.author).await? {
+        if let Some(id) = similar_book(&state.db, owner, &meta.title, &meta.author, false).await? {
             return Ok(Stored::Similar(id));
         }
     }
@@ -723,16 +726,18 @@ enum Stored {
 
 // ponytail: trigram similarity over every book, a seq scan per upload. Fine for a personal library;
 // at tens of thousands of books add a gin_trgm_ops index on title.
-async fn similar_book(
+pub(crate) async fn similar_book(
     db: &PgPool,
     viewer: Uuid,
     title: &str,
     author: &str,
+    audio: bool,
 ) -> Result<Option<Uuid>> {
     let sql = format!(
         "select id from books b
          where similarity(title, $1) >= $3
            and (author = '' or $2 = '' or lower(author) = lower($2) or similarity(author, $2) >= $4)
+           and (ext = $6) = $7
            and {}
          order by similarity(title, $1) desc
          limit 1",
@@ -744,6 +749,8 @@ async fn similar_book(
         .bind(SAME_TITLE)
         .bind(SAME_AUTHOR)
         .bind(viewer)
+        .bind(crate::audio::EXT)
+        .bind(audio)
         .fetch_optional(db)
         .await?;
     Ok(row.map(|(id,)| id))
@@ -752,7 +759,7 @@ async fn similar_book(
 const SAME_TITLE: f32 = 0.8;
 const SAME_AUTHOR: f32 = 0.6;
 
-async fn one_book(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<serde_json::Value> {
+pub(crate) async fn one_book(db: &PgPool, user: &AuthUser, id: Uuid) -> Result<serde_json::Value> {
     let sql = format!(
         "select {BOOK_COLS} {BOOK_FROM} where b.id = $2 and {}",
         visible_to("$1")
@@ -1162,6 +1169,7 @@ mod tests {
             read_pos: None,
             public: false,
             public_basis: None,
+            seconds: None,
         };
         let user = |admin| AuthUser {
             id: me,
@@ -1211,7 +1219,11 @@ mod tests {
 
         let similar = |title: &'static str, author: &'static str| {
             let db = db.clone();
-            async move { similar_book(&db, viewer, title, author).await.unwrap() }
+            async move {
+                similar_book(&db, viewer, title, author, false)
+                    .await
+                    .unwrap()
+            }
         };
         let brackets = "Важные годы [Почему не стоит откладывать жизнь на потом]";
         assert_eq!(similar(brackets, "Мэг Джей").await, Some(id));

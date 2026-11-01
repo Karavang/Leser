@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { AUDIO_TYPES, audioGroups, groupName, hoursMinutes, isAudio } from "../audio";
 
 // Тот же список, что BOOK_EXTS в api/src/books.rs — здесь он только чтобы
 // в диалоге выбора файла не показывались форматы, которые всё равно отлетят.
@@ -21,11 +22,42 @@ const BOOK_TYPES = [
   "htm",
   "rda",
 ];
-const ACCEPT = BOOK_TYPES.map((t) => `.${t}`).join(",");
+const ACCEPT = [...BOOK_TYPES, ...AUDIO_TYPES].map((t) => `.${t}`).join(",");
 /// В подписи только основные имена: `htm` рядом с `html` читателю ничего
 /// не говорит, а строка из-за них переносится на три.
 const SHOWN = ["epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html"];
 const MAX_MB = 90;
+const MAX_AUDIO_GB = 4;
+const extOf = (file) => file.name.split(".").pop().toLowerCase();
+
+const duration = (file) =>
+  new Promise((resolve) => {
+    const probe = document.createElement("audio");
+    const url = URL.createObjectURL(file);
+    let timer;
+    const done = (seconds) => {
+      clearTimeout(timer);
+      probe.removeAttribute("src");
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : 0);
+    };
+    timer = setTimeout(() => done(0), 20000);
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => done(probe.duration);
+    probe.onerror = () => done(0);
+    probe.src = url;
+  });
+
+const again = async (send, tries = 3) => {
+  for (let n = 1; ; n++) {
+    try {
+      return await send();
+    } catch (error) {
+      if (error.response || n >= tries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * n));
+    }
+  }
+};
 
 /// Что показать про файл в списке. Ошибку присылает бэк — она конкретнее
 /// любой нашей: битый файл, DRM, не тот формат внутри.
@@ -72,8 +104,68 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
 
   const auth = { headers: { Authorization: `Bearer ${user.token}` } };
 
+  const failed = (item, error) => {
+    const dup = error.response?.status === 409 && error.response.data;
+    if (dup) {
+      patch(item.id, { state: dup.duplicate, book: dup.book });
+      if (dup.duplicate === "same") onAdded?.();
+      return;
+    }
+    const said = error.response?.data?.message;
+    const code = error.response?.status;
+    patch(item.id, {
+      state: "fail",
+      tracks: null,
+      message: said ?? (code ? `${t("uploadFailed")} (${code})` : t("uploadFailed")),
+    });
+  };
+
+  const sendAudio = async (item, force) => {
+    if (item.files.some((f) => f.size > MAX_AUDIO_GB * 1024 ** 3)) {
+      return patch(item.id, { state: "fail", message: t("tooBigGb", MAX_AUDIO_GB) });
+    }
+    patch(item.id, { state: "send", percent: 0, force, editError: null });
+    const slow = { ...auth, patient: true };
+    try {
+      let tracks = item.tracks;
+      if (!tracks) {
+        const total = item.files.reduce((n, f) => n + f.size, 0) || 1;
+        let sent = 0;
+        tracks = [];
+        for (const file of item.files) {
+          const seconds = await duration(file);
+          const { data } = await axios.post("/api/audio/tracks", { name: file.name, size: file.size, seconds }, slow);
+          for (let start = 0; start < file.size; start += data.chunk) {
+            const part = file.slice(start, start + data.chunk);
+            await again(() =>
+              axios.post(`/api/audio/tracks/${data.id}?start=${start}`, part, {
+                ...slow,
+                headers: { ...auth.headers, "Content-Type": "application/octet-stream" },
+                onUploadProgress: (e) =>
+                  patch(item.id, { percent: Math.min(99, Math.round(((sent + e.loaded) / total) * 100)) }),
+              }),
+            );
+            sent += part.size;
+          }
+          tracks.push(data.id);
+        }
+        patch(item.id, { tracks, percent: 100 });
+      }
+      const { data } = await axios.post(
+        `/api/audio${force ? "?force=true" : ""}`,
+        { tracks, title: item.name },
+        slow,
+      );
+      patch(item.id, { state: "check", book: data.book });
+      onAdded?.();
+    } catch (error) {
+      failed(item, error);
+    }
+  };
+
   const send = async (item, force = false) => {
-    const ext = item.file.name.split(".").pop().toLowerCase();
+    if (item.audio) return sendAudio(item, force);
+    const ext = extOf(item.file);
     if (!BOOK_TYPES.includes(ext)) {
       return patch(item.id, { state: "fail", message: t("badFormat") });
     }
@@ -95,20 +187,7 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
       // книга уже в базе — список обновляем сразу, а не к перезагрузке
       onAdded?.();
     } catch (error) {
-      const dup = error.response?.status === 409 && error.response.data;
-      if (dup) {
-        patch(item.id, { state: dup.duplicate, book: dup.book });
-        if (dup.duplicate === "same") onAdded?.();
-        return;
-      }
-      // Сообщение присылает бэк; но 502 от nginx или обрыв связи приходят
-      // без него — тогда хотя бы код, иначе причину не отличить от причины.
-      const said = error.response?.data?.message;
-      const code = error.response?.status;
-      patch(item.id, {
-        state: "fail",
-        message: said ?? (code ? `${t("uploadFailed")} (${code})` : t("uploadFailed")),
-      });
+      failed(item, error);
     }
   };
 
@@ -151,12 +230,22 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
   /// Книги уходят по одной, а не разом: десять файлов сразу — это десять
   /// разборов epub на сервере в один момент.
   const add = (files) => {
-    const fresh = [...files].map((file) => ({
-      id: nextId.current++,
-      file,
-      state: "wait",
-      percent: 0,
-    }));
+    const all = [...files];
+    const sounds = all.filter((f) => AUDIO_TYPES.includes(extOf(f)));
+    const fresh = [
+      ...all
+        .filter((f) => !sounds.includes(f))
+        .map((file) => ({ id: nextId.current++, file, state: "wait", percent: 0 })),
+      ...audioGroups(sounds).map((group) => ({
+        id: nextId.current++,
+        audio: true,
+        files: group,
+        name: groupName(group),
+        file: { name: groupName(group) },
+        state: "wait",
+        percent: 0,
+      })),
+    ];
     setItems((prev) => [...prev, ...fresh]);
     fresh.reduce((queue, item) => queue.then(() => send(item)), Promise.resolve());
   };
@@ -224,6 +313,8 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
             {SHOWN.join(" · ")}
             <br />
             {t("eachUpTo", MAX_MB)}
+            <br />
+            {t("audioHint", MAX_AUDIO_GB)}
           </small>
         </label>
 
@@ -233,6 +324,7 @@ export const ModalAdd = ({ setIsAddModal, onAdded }) => {
               <li key={item.id} className={item.state}>
                 <span className="uploadName">
                   {item.book && item.state !== "similar" ? item.book.title : item.file.name}
+                  {item.audio && item.files.length > 1 && <small> · {t("filesCount", item.files.length)}</small>}
                 </span>
                 {STATE[item.state] && (
                   <span className="uploadState">{STATE[item.state](item)}</span>
@@ -323,7 +415,13 @@ const BookLine = ({ book }) => (
     <span>{book.author || t("noAuthor")}</span>
     {book.series && <span>{book.series}</span>}
     <small>
-      {[book.ext, book.lang, book.date?.slice(0, 4)].filter(Boolean).join(" · ")}
+      {[
+        isAudio(book) ? t("hoursMinutes", ...hoursMinutes(book.seconds)) : book.ext,
+        book.lang,
+        book.date?.slice(0, 4),
+      ]
+        .filter(Boolean)
+        .join(" · ")}
     </small>
   </div>
 );

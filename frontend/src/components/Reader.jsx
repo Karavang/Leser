@@ -11,7 +11,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { LoadingBook } from "../ui/Loading.jsx";
 import { t } from "../i18n";
 import { isOffline, useOffline } from "../offline";
-import { sendPage, unsentPage } from "../sync";
+import { rememberSpot, savedSpot, sendPage, unsentPage } from "../sync";
 import { applyTheme, theme as saved, THEMES } from "../theme";
 
 /// Читалка одна на все форматы: сервер отдаёт книгу главами с разметкой
@@ -90,16 +90,6 @@ const savedLook = () => {
   return { ...freshLook(), ...(old ? { size: old } : {}), ...look };
 };
 
-/// Где читатель остановился — доля книги, а не номер страницы: страницы
-/// разные при разном шрифте и размере окна, доля одна и та же.
-const savedSpot = (id) => {
-  const user = JSON.parse(localStorage.getItem("user")) || {};
-  const spot = (user.pages || []).find((p) => p.id === id);
-  const frac = Number.parseFloat(spot?.page);
-  // старые закладки — epubcfi от прежней читалки, числом не притворяются
-  return Number.isFinite(frac) && frac >= 0 && frac < 1 ? frac : 0;
-};
-
 /// Одно слово — то, что кладут в словарь; всё остальное идёт в цитаты.
 /// Дефис и апостроф внутри слова считаются частью слова: «во-первых»,
 /// «don't», «l'homme» — это по-прежнему одно слово.
@@ -124,14 +114,6 @@ const locate = (chapters, frac) => {
 const pageOf = (v, el) => {
   const left = el.getBoundingClientRect().left - v.getBoundingClientRect().left;
   return Math.floor((left + v.scrollLeft + 2) / v.clientWidth);
-};
-
-const rememberSpot = (id, frac) => {
-  const user = JSON.parse(localStorage.getItem("user"));
-  if (!user) return;
-  user.pages = (user.pages || []).filter((p) => p.id !== id);
-  user.pages.push({ id, page: String(frac) });
-  localStorage.setItem("user", JSON.stringify(user));
 };
 
 export const Reader = () => {
