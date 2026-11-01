@@ -147,7 +147,10 @@ fn parse_epub(bytes: &[u8]) -> Result<Meta> {
     };
     Ok(Meta {
         title: get("title").unwrap_or_default(),
-        author: get("creator").unwrap_or_default(),
+        // ponytail: ru.wikisource exports write "автор Имя Фамилия" into dc:creator; other prefixes stay until a source sends them.
+        author: get("creator")
+            .map(|a| a.strip_prefix("автор ").map(str::to_string).unwrap_or(a))
+            .unwrap_or_default(),
         // EPUB3 пишет серию в belongs-to-collection, calibre в EPUB2 —
         // в <meta name="calibre:series">. Встречается и то, и другое.
         series: get("belongs-to-collection").or_else(|| get("calibre:series")),

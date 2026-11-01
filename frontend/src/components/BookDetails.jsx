@@ -113,7 +113,13 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
               </dd>
             </>
           )}
-          {book.publicBasis && (
+          {book.publicBasis && !/^Q\d+ /.test(book.publicBasis) && (
+            <>
+              <dt>{t("license")}</dt>
+              <dd>{book.publicBasis}</dd>
+            </>
+          )}
+          {/^Q\d+ /.test(book.publicBasis ?? "") && (
             <>
               <dt>{t("publicDomain")}</dt>
               <dd>

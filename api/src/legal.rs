@@ -98,16 +98,18 @@ async fn people(http: &reqwest::Client, name: &str, lang: &str) -> reqwest::Resu
 /// Looks the book's authors up in Wikidata and opens the book to everyone when it is in the public domain.
 /// It never closes a book: what the admin opened by hand stays open.
 pub async fn check(state: Arc<AppState>, id: Uuid) {
-    let row: Option<(String, Option<String>)> =
-        match sqlx::query_as("select author, lang from books where id = $1 and ext <> $2")
-            .bind(id)
-            .bind(crate::audio::EXT)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(row) => row,
-            Err(e) => return tracing::warn!("legal check of {id}: {e}"),
-        };
+    let row: Option<(String, Option<String>)> = match sqlx::query_as(
+        "select author, lang from books
+             where id = $1 and (ext <> $2 or source_url like 'https://librivox.org/%')",
+    )
+    .bind(id)
+    .bind(crate::audio::EXT)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return tracing::warn!("legal check of {id}: {e}"),
+    };
     let Some((author, lang)) = row else { return };
     let lang = lang_code(lang.as_deref());
 

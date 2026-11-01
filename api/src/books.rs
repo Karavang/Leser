@@ -598,9 +598,11 @@ async fn store_book(
     ext: &str,
     name: &str,
     bytes: axum::body::Bytes,
-    source_url: Option<&str>,
+    origin: Option<(&str, &crate::open::Described)>,
     force: bool,
 ) -> Result<Stored> {
+    let source_url = origin.map(|(url, _)| url);
+    let described = origin.map(|(_, d)| d);
     // .rda хранить как есть незачем: читалки под него нет, а текст внутри
     // обычный. Превращаем в fb2 здесь, и дальше он ничем не отличается
     // от книги, загруженной файлом.
@@ -618,6 +620,12 @@ async fn store_book(
     // Имя файла — единственное, что о книге вообще известно.
     if meta.title == crate::parse::UNTITLED {
         meta.title = title_from_filename(name);
+    }
+    if let Some(title) = described.and_then(|d| d.title.as_ref()) {
+        meta.title = crate::parse::clean(title, 300);
+    }
+    if let Some(author) = described.and_then(|d| d.author.as_ref()) {
+        meta.author = crate::parse::clean(author, 300);
     }
 
     let hash = sha2::Sha256::digest(&bytes).to_vec();
@@ -938,9 +946,11 @@ pub async fn import(
     // Адрес вида /ebooks/2554.epub3.images расширения не содержит — там epub.
     let ext = book_ext(url.path()).unwrap_or_else(|_| "epub".into());
 
+    let described = crate::open::describe(&state.http, &url).await;
     let response = state
         .http
         .get(url.clone())
+        .timeout(std::time::Duration::from_secs(90))
         .send()
         .await
         .map_err(|e| {
@@ -975,14 +985,37 @@ pub async fn import(
     }
 
     let source = body.page_url.as_deref().unwrap_or(&body.url);
-    let location =
-        match store_book(&state, user.id, &ext, url.path(), bytes, Some(source), true).await? {
-            Stored::New(id) => {
-                tokio::spawn(crate::legal::check(state.clone(), id));
-                id
+    let location = match store_book(
+        &state,
+        user.id,
+        &ext,
+        url.path(),
+        bytes,
+        Some((source, &described)),
+        true,
+    )
+    .await?
+    {
+        Stored::New(id) => {
+            match &described.basis {
+                Some(basis) => {
+                    sqlx::query(
+                            "update books set public = true, public_basis = $2, legal_checked_at = now()
+                             where id = $1",
+                        )
+                        .bind(id)
+                        .bind(basis)
+                        .execute(&state.db)
+                        .await?;
+                }
+                None => {
+                    tokio::spawn(crate::legal::check(state.clone(), id));
+                }
             }
-            Stored::Same(id) | Stored::Similar(id) => id,
-        };
+            id
+        }
+        Stored::Same(id) | Stored::Similar(id) => id,
+    };
 
     Ok(Json(serde_json::json!({
         "message": "Книга добавлена в библиотеку",

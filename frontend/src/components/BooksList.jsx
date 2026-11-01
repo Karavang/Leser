@@ -19,7 +19,17 @@ const savedBySeries = () => {
 const EMPTY_BOOK = "M12 6.5C10 5 7 4.5 3 5v13c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5zM12 6.5v13";
 const EMPTY_AUDIO = "M4 18v-6a8 8 0 0 1 16 0v6M4 14h3v6H4zM17 14h3v6h-3z";
 
-export const BooksList = ({ books, audio = false, onDeleted, onChange }) => {
+const EMPTY = {
+  mine: ["noBooks", "emptyMine"],
+  library: ["noBooks", "emptyLibrary"],
+  audio: ["noAudio", "emptyAudio"],
+};
+
+export const BooksList = ({ books, kind = "library", searching = false, onDeleted, onChange }) => {
+  const audio = kind === "audio";
+  const [emptyTitle, emptyHint] = searching
+    ? ["nothingFound", kind === "mine" ? "searchLibraryTab" : "lookingOutside"]
+    : EMPTY[kind] ?? EMPTY.library;
   const navigate = useNavigate();
 
   const [isEnter, setEnter] = useState(null);
@@ -206,7 +216,8 @@ export const BooksList = ({ books, audio = false, onDeleted, onChange }) => {
           >
             <path d={audio ? EMPTY_AUDIO : EMPTY_BOOK} />
           </svg>
-          <p>{audio ? t("noAudio") : t("noBooks")}</p>
+          <p>{t(emptyTitle)}</p>
+          <small>{t(emptyHint)}</small>
         </div>
       )}
       {details && (

@@ -78,14 +78,14 @@ export const SourceResults = ({ found, onImported, audio = false, books = [] }) 
                 <h4>{book.title}</h4>
                 {book.author && <p>{book.author}</p>}
                 {audio && book.seconds > 0 && (
-                  <p>{[t("hoursMinutes", ...hoursMinutes(book.seconds)), book.lang].filter(Boolean).join(" · ")}</p>
+                  <p>{t("hoursMinutes", ...hoursMinutes(book.seconds))}</p>
                 )}
                 <a
                   href={book.pageUrl}
                   target="_blank"
                   rel="noreferrer noopener"
                 >
-                  {book.source}
+                  {[book.source, book.lang].filter(Boolean).join(" · ")}
                 </a>
                 {waiting[key] && <p className="sourceWait">{t("importAudioWait")}</p>}
               </div>

@@ -2807,5 +2807,11 @@ li {
   p {
     margin: 0;
     font-size: 1.05rem;
+    color: var(--ink);
+  }
+  small {
+    max-width: 420px;
+    font-size: 0.85rem;
+    line-height: 1.5;
   }
 }

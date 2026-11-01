@@ -24,6 +24,10 @@ const ALLOWED_HOSTS: &[&str] = &[
     "codeload.github.com",
     "librivox.org",
     "archive.org",
+    "gutenberg.pglaf.org",
+    "wolnelektury.pl",
+    "ws-export.wmcloud.org",
+    "textgridlab.org",
 ];
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -75,27 +79,67 @@ pub struct Found {
     /// Прямая ссылка на файл — её принимает `/import`.
     pub download_url: String,
     pub ext: String,
+    pub lang: Option<String>,
 }
 
 /// Опрашивает источники параллельно. Упавший источник — это ноль его книг,
 /// а не ошибка всего поиска: Gutenberg лежит, GitHub всё равно отвечает.
 pub async fn search(client: &reqwest::Client, q: &str, github_token: Option<&str>) -> Vec<Found> {
-    let (gutenberg, github) = tokio::join!(gutenberg(client, q), github(client, q, github_token));
+    let (wolne, wikisource, gutenberg, textgrid, github) = tokio::join!(
+        patient(crate::open::wolnelektury(client, q)),
+        patient(crate::open::wikisource(client, q)),
+        patient(gutenberg(client, q)),
+        patient(crate::open::textgrid(client, q)),
+        patient(github(client, q, github_token)),
+    );
+    let lists = [
+        ("wolnelektury", wolne),
+        ("wikisource", wikisource),
+        ("gutenberg", gutenberg),
+        ("textgrid", textgrid),
+        ("github", github),
+    ]
+    .into_iter()
+    .filter_map(|(name, result)| {
+        result
+            .map_err(|e| tracing::warn!("источник {name} не ответил: {e}"))
+            .ok()
+    })
+    .collect();
+    interleave(lists)
+}
 
+// ponytail: one slow source must not hold the others back; ten seconds, then its books are simply missing.
+const SOURCE_WAIT: Duration = Duration::from_secs(10);
+
+async fn patient<T>(search: impl std::future::Future<Output = Result<Vec<T>>>) -> Result<Vec<T>> {
+    tokio::time::timeout(SOURCE_WAIT, search)
+        .await
+        .map_err(|_| AppError::internal("timed out"))?
+}
+
+pub fn interleave<T>(lists: Vec<Vec<T>>) -> Vec<T> {
+    let mut lists: Vec<std::vec::IntoIter<T>> = lists.into_iter().map(Vec::into_iter).collect();
     let mut out = Vec::new();
-    for (name, result) in [("gutenberg", gutenberg), ("github", github)] {
-        match result {
-            Ok(mut found) => out.append(&mut found),
-            Err(e) => tracing::warn!("источник {name} не ответил: {e}"),
+    loop {
+        let before = out.len();
+        for list in &mut lists {
+            out.extend(list.next());
+        }
+        if out.len() == before {
+            return out;
         }
     }
-    out
+}
+
+pub fn gutenberg_file(id: u64) -> String {
+    format!("https://gutenberg.pglaf.org/cache/epub/{id}/pg{id}-images-3.epub")
 }
 
 // ---------------------------------------------------------------- Gutenberg
 
-/// Project Gutenberg через gutendex.com — открытый API без ключей.
-/// Всё, что там лежит, — общественное достояние, поэтому источник первый.
+// ponytail: gutendex (a third-party index) answers the search, the file comes from the PGLAF mirror,
+// since Project Gutenberg's robot policy keeps automated downloads off www.gutenberg.org.
 async fn gutenberg(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
     #[derive(serde::Deserialize)]
     struct Resp {
@@ -107,6 +151,8 @@ async fn gutenberg(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
         title: String,
         authors: Vec<Author>,
         formats: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        languages: Vec<String>,
     }
     #[derive(serde::Deserialize)]
     struct Author {
@@ -130,13 +176,15 @@ async fn gutenberg(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
         .results
         .into_iter()
         .filter_map(|item| {
-            // форматов у книги много; нужен epub, и без ".images" в ключе
-            // тоже встречается — берём первый подходящий
-            let download_url = item
-                .formats
-                .iter()
-                .find(|(k, _)| k.starts_with("application/epub"))
-                .map(|(_, v)| v.clone())?;
+            item.formats
+                .keys()
+                .find(|k| k.starts_with("application/epub"))?;
+            if item
+                .title
+                .starts_with("Index of the Project Gutenberg Works")
+            {
+                return None;
+            }
 
             Some(Found {
                 title: item.title,
@@ -147,11 +195,12 @@ async fn gutenberg(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
                     .unwrap_or_default(),
                 source: "Project Gutenberg".into(),
                 page_url: format!("https://www.gutenberg.org/ebooks/{}", item.id),
-                download_url,
+                download_url: gutenberg_file(item.id),
                 ext: "epub".into(),
+                lang: item.languages.first().cloned(),
             })
         })
-        .take(10)
+        .take(6)
         .collect())
 }
 
@@ -218,6 +267,7 @@ async fn github(client: &reqwest::Client, q: &str, token: Option<&str>) -> Resul
                     item.repository.full_name, branch, item.path
                 ),
                 ext,
+                lang: None,
             })
         })
         .collect())
@@ -235,13 +285,14 @@ pub struct FoundAudio {
     pub page_url: String,
 }
 
-pub struct LibriVox {
+pub struct Audiobook {
     pub title: String,
     pub author: String,
     pub lang: Option<String>,
     pub description: Option<String>,
     pub page_url: String,
     pub sections: Vec<Section>,
+    pub basis: Option<String>,
 }
 
 pub struct Section {
@@ -332,7 +383,7 @@ pub fn lv_lang(name: &str) -> Option<String> {
     Some(code.into())
 }
 
-fn strip_tags(s: &str) -> String {
+pub fn strip_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut inside = false;
     for c in s.chars() {
@@ -368,7 +419,19 @@ async fn lv_query(client: &reqwest::Client, params: &[(&str, &str)]) -> Result<V
     Ok(feed.books)
 }
 
-pub async fn librivox(client: &reqwest::Client, q: &str) -> Vec<FoundAudio> {
+pub async fn search_audio(client: &reqwest::Client, q: &str) -> Vec<FoundAudio> {
+    let (librivox, wolne) = tokio::join!(
+        tokio::time::timeout(SOURCE_WAIT, librivox(client, q)),
+        patient(crate::open::wolnelektury_audio(client, q)),
+    );
+    let librivox = librivox.unwrap_or_default();
+    let wolne = wolne
+        .map_err(|e| tracing::warn!("источник wolnelektury не ответил: {e}"))
+        .unwrap_or_default();
+    interleave(vec![librivox, wolne])
+}
+
+async fn librivox(client: &reqwest::Client, q: &str) -> Vec<FoundAudio> {
     let fields = "{id,title,authors,language,totaltimesecs,url_librivox}";
     let title = format!("^{q}");
     let last = q.split_whitespace().last().unwrap_or(q);
@@ -397,19 +460,20 @@ pub async fn librivox(client: &reqwest::Client, q: &str) -> Vec<FoundAudio> {
             source: "LibriVox".into(),
             page_url: b.url_librivox,
             title: b.title,
-            id: b.id,
+            id: format!("lv:{}", b.id),
         })
         .collect()
 }
 
-pub async fn librivox_book(client: &reqwest::Client, id: &str) -> Result<LibriVox> {
+pub async fn librivox_book(client: &reqwest::Client, id: &str) -> Result<Audiobook> {
     let book = lv_query(client, &[("id", id), ("extended", "1")])
         .await?
         .into_iter()
         .next()
         .ok_or_else(|| AppError::bad("Книга не найдена", "Book not found"))?;
     let description = strip_tags(&book.description);
-    Ok(LibriVox {
+    Ok(Audiobook {
+        basis: None,
         author: lv_author(&book),
         lang: lv_lang(&book.language),
         description: (!description.trim().is_empty()).then_some(description),
@@ -431,6 +495,21 @@ pub async fn librivox_book(client: &reqwest::Client, id: &str) -> Result<LibriVo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_source_gets_a_place_near_the_top() {
+        assert_eq!(
+            interleave(vec![vec![1, 2, 3], vec![], vec![10], vec![20, 21]]),
+            vec![1, 10, 20, 2, 21, 3]
+        );
+        assert!(interleave::<u8>(vec![]).is_empty());
+        let file = gutenberg_file(2554);
+        assert_eq!(
+            file,
+            "https://gutenberg.pglaf.org/cache/epub/2554/pg2554-images-3.epub"
+        );
+        assert!(host_allowed(&file.parse().unwrap()));
+    }
 
     #[test]
     fn only_https_and_only_known_hosts() {

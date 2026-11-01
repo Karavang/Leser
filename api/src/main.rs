@@ -19,6 +19,7 @@ mod images;
 mod legal;
 mod me;
 mod mobi;
+mod open;
 mod parse;
 mod pdf;
 mod rda;

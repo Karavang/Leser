@@ -395,7 +395,7 @@ pub async fn finish(
         }
     }
 
-    let id = create(&state, user.id, &staged, meta, None, false).await?;
+    let id = create(&state, user.id, &staged, meta, None, None, true).await?;
     let book = crate::books::one_book(&state.db, &user, id).await?;
     Ok(Json(serde_json::json!({ "book": book, "duplicate": null })).into_response())
 }
@@ -409,7 +409,7 @@ async fn duplicate(state: &AppState, user: &AuthUser, id: Uuid, kind: &str) -> R
         .into_response())
 }
 
-fn lang_code(tag: Option<&str>) -> Option<String> {
+pub(crate) fn lang_code(tag: Option<&str>) -> Option<String> {
     let code = crate::legal::lang_code(tag);
     let two = match code.as_str() {
         "rus" => "ru",
@@ -434,7 +434,8 @@ async fn create(
     staged: &[Staged],
     meta: Meta,
     source_url: Option<&str>,
-    public: bool,
+    basis: Option<&str>,
+    checked: bool,
 ) -> Result<Uuid> {
     let found = crate::enrich::on_upload(
         &state.http,
@@ -448,8 +449,10 @@ async fn create(
     let mut tx = state.db.begin().await?;
     let (id,): (Uuid,) = sqlx::query_as(
         "insert into books
-             (title, author, published, lang, description, ext, owner_id, source_url, public, legal_checked_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) returning id",
+             (title, author, published, lang, description, ext, owner_id, source_url,
+              public, public_basis, legal_checked_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9 is not null, $9, case when $10 then now() end)
+         returning id",
     )
     .bind(&meta.title)
     .bind(&meta.author)
@@ -459,7 +462,8 @@ async fn create(
     .bind(EXT)
     .bind(owner)
     .bind(source_url)
-    .bind(public)
+    .bind(basis)
+    .bind(checked)
     .fetch_one(&mut *tx)
     .await?;
     if let Some(found) = &found {
@@ -646,7 +650,7 @@ pub async fn search(
     if q.is_empty() {
         return Json(Vec::new());
     }
-    Json(crate::sources::librivox(&state.http, q).await)
+    Json(crate::sources::search_audio(&state.http, q).await)
 }
 
 // ponytail: LibriVox imports in flight (false) and failed ones (true) live in process memory;
@@ -667,13 +671,13 @@ pub async fn import(
     user: AuthUser,
     Json(body): Json<ImportAudio>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    let id = body.id;
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) || id.len() > 12 {
+    let Some((from, key)) = origin(&body.id) else {
         return Err(AppError::bad(
             "Неверный адрес книги",
             "Invalid book address",
         ));
-    }
+    };
+    let id = format!("{from}:{key}");
     let pending = || {
         Ok((
             StatusCode::ACCEPTED,
@@ -686,21 +690,23 @@ pub async fn import(
             imports(|m| m.remove(&id));
             return Err(AppError::new(
                 StatusCode::BAD_GATEWAY,
-                "Не удалось скачать книгу с LibriVox, попробуйте ещё раз",
-                "Could not download the book from LibriVox, try again",
+                "Не удалось скачать книгу из источника, попробуйте ещё раз",
+                "Could not download the book from its source, try again",
             ));
         }
         None => {}
     }
 
-    let book = crate::sources::librivox_book(&state.http, &id)
-        .await
-        .map_err(|e| {
-            AppError::bad(
-                format!("LibriVox не ответил: {e}"),
-                format!("LibriVox did not respond: {e}"),
-            )
-        })?;
+    let book = match from {
+        "wl" => crate::open::wolnelektury_book(&state.http, key).await,
+        _ => crate::sources::librivox_book(&state.http, key).await,
+    }
+    .map_err(|e| {
+        AppError::bad(
+            format!("Источник не ответил: {e}"),
+            format!("The source did not respond: {e}"),
+        )
+    })?;
 
     let have: Option<(Uuid,)> =
         sqlx::query_as("select id from books where source_url = $1 and ext = $2")
@@ -736,10 +742,15 @@ pub async fn import(
     if imports(|m| m.insert(id.clone(), false).is_none()) {
         tokio::spawn(async move {
             match fetch(&state, user.id, &book).await {
-                Ok(_) => imports(|m| m.remove(&id)),
+                Ok(book_id) => {
+                    imports(|m| m.remove(&id));
+                    if book.basis.is_none() {
+                        crate::legal::check(state.clone(), book_id).await;
+                    }
+                }
                 Err(e) => {
-                    tracing::warn!("librivox import {id}: {e}");
-                    imports(|m| m.insert(id, true))
+                    tracing::warn!("audio import {id}: {e}");
+                    imports(|m| m.insert(id, true));
                 }
             };
         });
@@ -747,7 +758,18 @@ pub async fn import(
     pending()
 }
 
-async fn fetch(state: &AppState, owner: Uuid, book: &crate::sources::LibriVox) -> Result<Uuid> {
+pub fn origin(id: &str) -> Option<(&'static str, &str)> {
+    let (from, key) = id.split_once(':').unwrap_or(("lv", id));
+    match from {
+        "lv" if !key.is_empty() && key.len() <= 12 && key.chars().all(|c| c.is_ascii_digit()) => {
+            Some(("lv", key))
+        }
+        "wl" if crate::open::wl_slug(key) => Some(("wl", key)),
+        _ => None,
+    }
+}
+
+async fn fetch(state: &AppState, owner: Uuid, book: &crate::sources::Audiobook) -> Result<Uuid> {
     let mut staged = Vec::new();
     let result = async {
         for s in &book.sections {
@@ -761,7 +783,16 @@ async fn fetch(state: &AppState, owner: Uuid, book: &crate::sources::LibriVox) -
             ..Default::default()
         }
         .sanitized();
-        create(state, owner, &staged, meta, Some(&book.page_url), true).await
+        create(
+            state,
+            owner,
+            &staged,
+            meta,
+            Some(&book.page_url),
+            book.basis.as_deref(),
+            book.basis.is_some(),
+        )
+        .await
     }
     .await;
     if result.is_err() {
@@ -790,7 +821,7 @@ async fn download(state: &AppState, owner: Uuid, s: &crate::sources::Section) ->
         match pull(state, id, &s.url).await {
             Ok(size) => break size,
             Err(e) if attempt < 3 => {
-                tracing::warn!("librivox file {}, attempt {attempt}: {e}", s.url);
+                tracing::warn!("audio file {}, attempt {attempt}: {e}", s.url);
                 sqlx::query("delete from audio_chunks where track_id = $1")
                     .bind(id)
                     .execute(&state.db)
@@ -882,6 +913,24 @@ mod tests {
         assert_eq!(range(Some("bytes=-0"), 100), Some(Err(())));
         assert_eq!(range(Some("items=0-1"), 100), None);
         assert_eq!(range(Some("bytes=x-1"), 100), Some(Err(())));
+    }
+
+    #[test]
+    fn import_ids_name_their_source() {
+        assert_eq!(origin("271"), Some(("lv", "271")));
+        assert_eq!(origin("lv:271"), Some(("lv", "271")));
+        assert_eq!(origin("wl:pan-tadeusz"), Some(("wl", "pan-tadeusz")));
+        for bad in [
+            "",
+            "lv:",
+            "lv:12a",
+            "wl:../x",
+            "wl:",
+            "xx:1",
+            "1234567890123",
+        ] {
+            assert_eq!(origin(bad), None, "{bad}");
+        }
     }
 
     #[test]
