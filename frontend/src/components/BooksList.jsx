@@ -16,7 +16,10 @@ const savedBySeries = () => {
   }
 };
 
-export const BooksList = ({ books, empty, onDeleted, onChange }) => {
+const EMPTY_BOOK = "M12 6.5C10 5 7 4.5 3 5v13c4-.5 7 0 9 1.5 2-1.5 5-2 9-1.5V5c-4-.5-7 0-9 1.5zM12 6.5v13";
+const EMPTY_AUDIO = "M4 18v-6a8 8 0 0 1 16 0v6M4 14h3v6H4zM17 14h3v6h-3z";
+
+export const BooksList = ({ books, audio = false, onDeleted, onChange }) => {
   const navigate = useNavigate();
 
   const [isEnter, setEnter] = useState(null);
@@ -189,7 +192,22 @@ export const BooksList = ({ books, empty, onDeleted, onChange }) => {
           </section>
         ))
       ) : (
-        <p>{empty ?? t("noBooks")}</p>
+        <div className="emptyList">
+          <svg
+            aria-hidden="true"
+            width="72"
+            height="72"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d={audio ? EMPTY_AUDIO : EMPTY_BOOK} />
+          </svg>
+          <p>{audio ? t("noAudio") : t("noBooks")}</p>
+        </div>
       )}
       {details && (
         <BookDetails

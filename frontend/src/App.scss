@@ -2790,3 +2790,22 @@ li {
     opacity: 0.8;
   }
 }
+
+.emptyList {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 45vh;
+  text-align: center;
+  color: var(--dim);
+
+  svg {
+    color: var(--back-orange);
+  }
+  p {
+    margin: 0;
+    font-size: 1.05rem;
+  }
+}

@@ -257,7 +257,7 @@ export const Home = () => {
       ) : (
         <BooksList
           books={shownBooks}
-          empty={tab === "audio" ? t("noAudio") : t("noBooks")}
+          audio={tab === "audio"}
           onDeleted={onDeleted}
           onChange={onChange}
         />
