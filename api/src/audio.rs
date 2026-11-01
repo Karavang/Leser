@@ -395,7 +395,7 @@ pub async fn finish(
         }
     }
 
-    let id = create(&state, user.id, &staged, meta, None, None, true).await?;
+    let id = create(&state, Some(user.id), &staged, meta, None, None, true).await?;
     let book = crate::books::one_book(&state.db, &user, id).await?;
     Ok(Json(serde_json::json!({ "book": book, "duplicate": null })).into_response())
 }
@@ -430,7 +430,7 @@ pub(crate) fn lang_code(tag: Option<&str>) -> Option<String> {
 
 async fn create(
     state: &AppState,
-    owner: Uuid,
+    owner: Option<Uuid>,
     staged: &[Staged],
     meta: Meta,
     source_url: Option<&str>,
@@ -483,11 +483,13 @@ async fn create(
         .execute(&mut *tx)
         .await?;
     }
-    sqlx::query("insert into shelf (user_id, book_id) values ($1, $2) on conflict do nothing")
-        .bind(owner)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    if let Some(owner) = owner {
+        sqlx::query("insert into shelf (user_id, book_id) values ($1, $2) on conflict do nothing")
+            .bind(owner)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     Ok(id)
 }
@@ -741,7 +743,7 @@ pub async fn import(
     }
     if imports(|m| m.insert(id.clone(), false).is_none()) {
         tokio::spawn(async move {
-            match fetch(&state, user.id, &book).await {
+            match fetch(&state, Some(user.id), &book).await {
                 Ok(book_id) => {
                     imports(|m| m.remove(&id));
                     if book.basis.is_none() {
@@ -769,7 +771,31 @@ pub fn origin(id: &str) -> Option<(&'static str, &str)> {
     }
 }
 
-async fn fetch(state: &AppState, owner: Uuid, book: &crate::sources::Audiobook) -> Result<Uuid> {
+pub(crate) async fn seed(state: &Arc<AppState>, key: &str) -> Result<()> {
+    let Some(("wl", slug)) = origin(key) else {
+        return Err(AppError::bad(
+            "Неверный адрес книги",
+            "Invalid book address",
+        ));
+    };
+    let book = crate::open::wolnelektury_book(&state.http, slug).await?;
+    let have: Option<(Uuid,)> =
+        sqlx::query_as("select id from books where source_url = $1 and ext = $2")
+            .bind(&book.page_url)
+            .bind(EXT)
+            .fetch_optional(&state.db)
+            .await?;
+    if have.is_none() {
+        fetch(state, None, &book).await?;
+    }
+    Ok(())
+}
+
+async fn fetch(
+    state: &AppState,
+    owner: Option<Uuid>,
+    book: &crate::sources::Audiobook,
+) -> Result<Uuid> {
     let mut staged = Vec::new();
     let result = async {
         for s in &book.sections {
@@ -805,7 +831,11 @@ async fn fetch(state: &AppState, owner: Uuid, book: &crate::sources::Audiobook) 
     result
 }
 
-async fn download(state: &AppState, owner: Uuid, s: &crate::sources::Section) -> Result<Staged> {
+async fn download(
+    state: &AppState,
+    owner: Option<Uuid>,
+    s: &crate::sources::Section,
+) -> Result<Staged> {
     let (id,): (Uuid,) = sqlx::query_as(
         "insert into audio_tracks (owner_id, title, mime, seconds, size)
          values ($1, $2, 'audio/mpeg', $3, 0) returning id",

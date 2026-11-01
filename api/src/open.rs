@@ -200,6 +200,66 @@ pub async fn wolnelektury_audio(client: &reqwest::Client, q: &str) -> Result<Vec
         .collect())
 }
 
+async fn wl_popular(client: &reqwest::Client, audio: bool) -> Result<Vec<WlBook>> {
+    let mut query = vec![("sort", "-popularity"), ("limit", "40")];
+    if audio {
+        query.push(("has_audio", "true"));
+    }
+    let page: WlPage = json(client, &format!("{WL}/books/"), &query).await?;
+    Ok(page
+        .member
+        .into_iter()
+        .filter(|b| b.parent.as_ref().is_none_or(serde_json::Value::is_null) && !b.preview)
+        .collect())
+}
+
+pub async fn wolnelektury_top(client: &reqwest::Client, n: usize) -> Result<Vec<Found>> {
+    Ok(wl_popular(client, false)
+        .await?
+        .into_iter()
+        .filter_map(|b| {
+            Some(Found {
+                download_url: b.epub.clone()?,
+                author: names(&b.authors),
+                source: "Wolne Lektury".into(),
+                page_url: b.url,
+                ext: "epub".into(),
+                lang: crate::audio::lang_code(Some(&b.language)),
+                title: b.title,
+            })
+        })
+        .take(n)
+        .collect())
+}
+
+pub async fn wolnelektury_audio_top(
+    client: &reqwest::Client,
+    n: usize,
+    max_bytes: u64,
+) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Sized {
+        #[serde(default)]
+        size: u64,
+    }
+    let mut out = Vec::new();
+    for book in wl_popular(client, true).await? {
+        if out.len() >= n {
+            break;
+        }
+        if !book.has_mp3_file {
+            continue;
+        }
+        let tracks: Vec<Sized> =
+            json(client, &format!("{WL}/books/{}/media/mp3/", book.slug), &[]).await?;
+        let total: u64 = tracks.iter().map(|t| t.size).sum();
+        if !tracks.is_empty() && total <= max_bytes {
+            out.push(format!("wl:{}", book.slug));
+        }
+    }
+    Ok(out)
+}
+
 pub fn wl_slug(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 200
@@ -320,8 +380,6 @@ struct WsPage {
     pageprops: Option<serde_json::Value>,
     #[serde(default)]
     categories: Vec<WsTitle>,
-    #[serde(default)]
-    links: Vec<WsTitle>,
 }
 
 impl WsPage {
@@ -361,12 +419,28 @@ pub fn starts_like(title: &str, q: &str) -> bool {
 pub fn editions(base: &str, links: &[String], limit: usize) -> Vec<String> {
     let key: String = letters(base).chars().take(6).collect();
     let depth = base.matches('/').count();
-    let mut found: Vec<&String> = links
+    let rank = |l: &str| {
+        let last = l.rsplit('/').next().unwrap_or(l);
+        if l.starts_with(&format!("{base}/")) && l.matches('/').count() == depth + 1 {
+            Some(0)
+        } else if letters(l).starts_with(&key) && l.matches('/').count() <= depth + 1 {
+            Some(1)
+        } else if last != l && letters(last).starts_with(&key) {
+            Some(2)
+        } else {
+            None
+        }
+    };
+    let mut found: Vec<(u8, &String)> = links
         .iter()
-        .filter(|l| letters(l).starts_with(&key) && l.matches('/').count() <= depth + 1)
+        .filter_map(|l| rank(l).map(|r| (r, l)))
         .collect();
-    found.sort_by_key(|l| !l.starts_with(base));
-    found.into_iter().take(limit).cloned().collect()
+    found.sort_by_key(|(r, l)| (*r, l.contains("(ДО)")));
+    found
+        .into_iter()
+        .take(limit)
+        .map(|(_, l)| l.clone())
+        .collect()
 }
 
 async fn ws_query(
@@ -444,6 +518,45 @@ async fn wikisource_in(client: &reqwest::Client, lang: &str, q: &str) -> Result<
         return Ok(Vec::new());
     }
 
+    Ok(works(client, lang, &roots)
+        .await?
+        .into_iter()
+        .take(4)
+        .map(|title| ws_found(lang, title))
+        .collect())
+}
+
+pub async fn wikisource_page(
+    client: &reqwest::Client,
+    lang: &str,
+    title: &str,
+) -> Result<Option<Found>> {
+    Ok(works(client, lang, &[title.to_string()])
+        .await?
+        .into_iter()
+        .next()
+        .map(|t| ws_found(lang, t)))
+}
+
+fn ws_found(lang: &str, title: String) -> Found {
+    Found {
+        page_url: format!(
+            "https://{lang}.wikisource.org/wiki/{}",
+            percent_encoding::utf8_percent_encode(
+                &title.replace(' ', "_"),
+                percent_encoding::NON_ALPHANUMERIC
+            )
+        ),
+        download_url: ws_export(lang, &title),
+        author: String::new(),
+        source: "Wikisource".into(),
+        ext: "epub".into(),
+        lang: Some(lang.to_string()),
+        title,
+    }
+}
+
+async fn works(client: &reqwest::Client, lang: &str, roots: &[String]) -> Result<Vec<String>> {
     let joined = roots.join("|");
     let props = ws_query(
         client,
@@ -475,30 +588,30 @@ async fn wikisource_in(client: &reqwest::Client, lang: &str, q: &str) -> Result<
         .filter(|p| p.lists_versions())
         .map(|p| p.title.as_str())
         .collect();
-    let mut links: HashMap<String, Vec<String>> = HashMap::new();
+    let mut linked: Vec<String> = Vec::new();
     if !versions.is_empty() {
         let joined = versions.join("|");
-        let linked = ws_query(
+        linked = ws_query(
             client,
             lang,
             &[
                 ("titles", &joined),
-                ("prop", "links"),
-                ("plnamespace", "0"),
-                ("pllimit", "max"),
+                ("generator", "links"),
+                ("gplnamespace", "0"),
+                ("gpllimit", "max"),
+                ("prop", "info"),
             ],
         )
-        .await?;
-        for page in linked.pages {
-            links.insert(
-                page.title,
-                page.links.into_iter().map(|l| l.title).collect(),
-            );
-        }
+        .await?
+        .pages
+        .into_iter()
+        .filter(|p| !p.missing)
+        .map(|p| p.title)
+        .collect();
     }
 
     let mut works = Vec::new();
-    for root in &roots {
+    for root in roots {
         let mut title = root.clone();
         while let Some(next) = renamed.get(&title) {
             if *next == title {
@@ -510,35 +623,13 @@ async fn wikisource_in(client: &reqwest::Client, lang: &str, q: &str) -> Result<
             continue;
         };
         if page.lists_versions() {
-            works.extend(editions(
-                &page.title,
-                links.get(&page.title).map_or(&[][..], Vec::as_slice),
-                3,
-            ));
+            works.extend(editions(&page.title, &linked, 3));
         } else {
             works.push(page.title.clone());
         }
     }
 
-    Ok(unique(works.into_iter())
-        .into_iter()
-        .take(4)
-        .map(|title| Found {
-            page_url: format!(
-                "https://{lang}.wikisource.org/wiki/{}",
-                percent_encoding::utf8_percent_encode(
-                    &title.replace(' ', "_"),
-                    percent_encoding::NON_ALPHANUMERIC
-                )
-            ),
-            download_url: ws_export(lang, &title),
-            author: String::new(),
-            source: "Wikisource".into(),
-            ext: "epub".into(),
-            lang: Some(lang.to_string()),
-            title,
-        })
-        .collect())
+    Ok(unique(works.into_iter()))
 }
 
 const TEXTGRID: &str = "https://textgridlab.org/1.0";
@@ -611,6 +702,14 @@ pub fn person(name: &str) -> String {
     }
 }
 
+pub fn textgrid_file(uri: &str) -> String {
+    format!("{TEXTGRID}/aggregator/epub/{uri}")
+}
+
+pub fn textgrid_page(uri: &str) -> String {
+    format!("https://textgridrep.org/{uri}")
+}
+
 fn tg_uri(s: &str) -> bool {
     s.strip_prefix("textgrid:").is_some_and(|rest| {
         !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
@@ -648,8 +747,8 @@ pub async fn textgrid(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
         .filter(|h| h.size >= TG_MIN_SIZE && tg_uri(&h.uri) && !h.title.starts_with("Biographie"))
         .take(5)
         .map(|h| Found {
-            page_url: format!("https://textgridrep.org/{}", h.uri),
-            download_url: format!("{TEXTGRID}/aggregator/epub/{}", h.uri),
+            page_url: textgrid_page(&h.uri),
+            download_url: textgrid_file(&h.uri),
             author: person(&h.author),
             source: "TextGrid".into(),
             ext: "epub".into(),
@@ -757,6 +856,17 @@ mod tests {
                 "Капитанская дочка (Пушкин)/1978 (СО)",
                 "«Капитанская дочка» Пушкина (Черняев)",
             ])
+        );
+        assert_eq!(
+            editions(
+                "Захар Беркут",
+                &s(&[
+                    "Твори (Франко, 1956–1962)/13",
+                    "Твори (Франко, 1956–1962)/13/Захар Беркут"
+                ]),
+                3
+            ),
+            s(&["Твори (Франко, 1956–1962)/13/Захар Беркут"])
         );
         assert!(starts_like("Lalka (Prus)", "lalka"));
         assert!(!starts_like("Lalla Rookh", "Lalka"));

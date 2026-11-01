@@ -594,7 +594,7 @@ fn book_ext(name: &str) -> Result<String> {
 /// файл разбирается. Внутри не epub-архив или не fb2-разметка — 400.
 async fn store_book(
     state: &AppState,
-    owner: Uuid,
+    owner: Option<Uuid>,
     ext: &str,
     name: &str,
     bytes: axum::body::Bytes,
@@ -635,14 +635,16 @@ async fn store_book(
             .fetch_optional(&state.db)
             .await?;
     if let Some((id,)) = stored_copy {
-        sqlx::query(
-            "insert into shelf (user_id, book_id) values ($1, $2)
-             on conflict (user_id, book_id) do nothing",
-        )
-        .bind(owner)
-        .bind(id)
-        .execute(&state.db)
-        .await?;
+        if let Some(owner) = owner {
+            sqlx::query(
+                "insert into shelf (user_id, book_id) values ($1, $2)
+                 on conflict (user_id, book_id) do nothing",
+            )
+            .bind(owner)
+            .bind(id)
+            .execute(&state.db)
+            .await?;
+        }
         return Ok(Stored::Same(id));
     }
 
@@ -654,7 +656,15 @@ async fn store_book(
     let (doc, imgs) = crate::images::extract(doc);
 
     if !force {
-        if let Some(id) = similar_book(&state.db, owner, &meta.title, &meta.author, false).await? {
+        if let Some(id) = similar_book(
+            &state.db,
+            owner.unwrap_or_default(),
+            &meta.title,
+            &meta.author,
+            false,
+        )
+        .await?
+        {
             return Ok(Stored::Similar(id));
         }
     }
@@ -716,17 +726,19 @@ async fn store_book(
 
     // Кто книгу принёс, у того она сразу и в «моих»: отдельно откладывать
     // себе только что загруженную книгу — лишний шаг.
-    sqlx::query("insert into shelf (user_id, book_id) values ($1, $2)")
-        .bind(owner)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    if let Some(owner) = owner {
+        sqlx::query("insert into shelf (user_id, book_id) values ($1, $2)")
+            .bind(owner)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
 
     Ok(Stored::New(id))
 }
 
-enum Stored {
+pub(crate) enum Stored {
     New(Uuid),
     Same(Uuid),
     Similar(Uuid),
@@ -808,15 +820,24 @@ pub async fn put_new_one(
     }
     let ext = book_ext(&name)?;
 
-    let (code, duplicate, id) =
-        match store_book(&state, user.id, &ext, &name, bytes, None, upload.force).await? {
-            Stored::New(id) => {
-                tokio::spawn(crate::legal::check(state.clone(), id));
-                (StatusCode::OK, None, id)
-            }
-            Stored::Same(id) => (StatusCode::CONFLICT, Some("same"), id),
-            Stored::Similar(id) => (StatusCode::CONFLICT, Some("similar"), id),
-        };
+    let (code, duplicate, id) = match store_book(
+        &state,
+        Some(user.id),
+        &ext,
+        &name,
+        bytes,
+        None,
+        upload.force,
+    )
+    .await?
+    {
+        Stored::New(id) => {
+            tokio::spawn(crate::legal::check(state.clone(), id));
+            (StatusCode::OK, None, id)
+        }
+        Stored::Same(id) => (StatusCode::CONFLICT, Some("same"), id),
+        Stored::Similar(id) => (StatusCode::CONFLICT, Some("similar"), id),
+    };
     let book = one_book(&state.db, &user, id).await?;
     Ok((
         code,
@@ -931,8 +952,39 @@ pub async fn import(
     user: AuthUser,
     Json(body): Json<ImportBody>,
 ) -> Result<Json<serde_json::Value>> {
-    let url: reqwest::Url = body
-        .url
+    let (stored, licensed) = fetch_into_library(
+        &state,
+        Some(user.id),
+        &body.url,
+        body.page_url.as_deref(),
+        std::time::Duration::from_secs(90),
+    )
+    .await?;
+    let location = match stored {
+        Stored::New(id) => {
+            if !licensed {
+                tokio::spawn(crate::legal::check(state.clone(), id));
+            }
+            id
+        }
+        Stored::Same(id) | Stored::Similar(id) => id,
+    };
+
+    Ok(Json(serde_json::json!({
+        "message": "Книга добавлена в библиотеку",
+        "location": location,
+    })))
+}
+
+pub(crate) async fn fetch_into_library(
+    state: &AppState,
+    owner: Option<Uuid>,
+    url: &str,
+    page_url: Option<&str>,
+    wait: std::time::Duration,
+) -> Result<(Stored, bool)> {
+    let source = page_url.unwrap_or(url);
+    let url: reqwest::Url = url
         .parse()
         .map_err(|_| AppError::bad("Некорректная ссылка", "Malformed link"))?;
     if !crate::sources::host_allowed(&url) {
@@ -950,7 +1002,7 @@ pub async fn import(
     let response = state
         .http
         .get(url.clone())
-        .timeout(std::time::Duration::from_secs(90))
+        .timeout(wait)
         .send()
         .await
         .map_err(|e| {
@@ -984,43 +1036,27 @@ pub async fn import(
         return Err(too_big(MAX_IMPORT_MB));
     }
 
-    let source = body.page_url.as_deref().unwrap_or(&body.url);
-    let location = match store_book(
-        &state,
-        user.id,
+    let stored = store_book(
+        state,
+        owner,
         &ext,
         url.path(),
         bytes,
         Some((source, &described)),
         true,
     )
-    .await?
-    {
-        Stored::New(id) => {
-            match &described.basis {
-                Some(basis) => {
-                    sqlx::query(
-                            "update books set public = true, public_basis = $2, legal_checked_at = now()
-                             where id = $1",
-                        )
-                        .bind(id)
-                        .bind(basis)
-                        .execute(&state.db)
-                        .await?;
-                }
-                None => {
-                    tokio::spawn(crate::legal::check(state.clone(), id));
-                }
-            }
-            id
-        }
-        Stored::Same(id) | Stored::Similar(id) => id,
-    };
-
-    Ok(Json(serde_json::json!({
-        "message": "Книга добавлена в библиотеку",
-        "location": location,
-    })))
+    .await?;
+    if let (Stored::New(id), Some(basis)) = (&stored, &described.basis) {
+        sqlx::query(
+            "update books set public = true, public_basis = $2, legal_checked_at = now()
+             where id = $1",
+        )
+        .bind(id)
+        .bind(basis)
+        .execute(&state.db)
+        .await?;
+    }
+    Ok((stored, described.basis.is_some()))
 }
 
 pub async fn delete_one(

@@ -25,6 +25,7 @@ mod pdf;
 mod rda;
 mod reader;
 mod search;
+mod seed;
 mod sources;
 mod tags;
 mod tts;
@@ -217,6 +218,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     });
     tokio::spawn(legal::backfill(state.clone()));
     tokio::spawn(enrich::backfill(state.clone()));
+    tokio::spawn(seed::backfill(state.clone()));
     if state.github_token.is_none() {
         tracing::info!("GITHUB_TOKEN не задан — поиск по GitHub выключен");
     }

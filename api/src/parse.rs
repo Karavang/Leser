@@ -147,10 +147,7 @@ fn parse_epub(bytes: &[u8]) -> Result<Meta> {
     };
     Ok(Meta {
         title: get("title").unwrap_or_default(),
-        // ponytail: ru.wikisource exports write "автор Имя Фамилия" into dc:creator; other prefixes stay until a source sends them.
-        author: get("creator")
-            .map(|a| a.strip_prefix("автор ").map(str::to_string).unwrap_or(a))
-            .unwrap_or_default(),
+        author: get("creator").map(|a| bare_name(&a)).unwrap_or_default(),
         // EPUB3 пишет серию в belongs-to-collection, calibre в EPUB2 —
         // в <meta name="calibre:series">. Встречается и то, и другое.
         series: get("belongs-to-collection").or_else(|| get("calibre:series")),
@@ -163,6 +160,22 @@ fn parse_epub(bytes: &[u8]) -> Result<Meta> {
 
 /// FB2 читаем потоково и обрываемся на `</description>` — тело книги
 /// (часто с картинками в base64 на десятки мегабайт) не парсится вовсе.
+// ponytail: ru.wikisource exports write "автор Имя Фамилия (1809—1852)" into dc:creator; the prefix and the
+// years are cut so Wikidata can find the person. Other decorations stay until a source sends them.
+pub(crate) fn bare_name(name: &str) -> String {
+    let name = name.trim();
+    let name = name
+        .strip_prefix("автор ")
+        .or_else(|| name.strip_prefix("авторъ "))
+        .unwrap_or(name);
+    match name.rsplit_once(" (") {
+        Some((head, tail)) if tail.ends_with(')') && tail.chars().any(|c| c.is_ascii_digit()) => {
+            head.trim().to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
 pub(crate) fn parse_fb2(bytes: &[u8]) -> Result<Meta> {
     let mut reader = quick_xml::Reader::from_reader(bytes);
     reader.config_mut().trim_text(true);
@@ -368,6 +381,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.series, None);
+    }
+
+    #[test]
+    fn wikisource_author_loses_prefix_and_years() {
+        assert_eq!(
+            bare_name("автор Николай Васильевич Гоголь (1809—1852)"),
+            "Николай Васильевич Гоголь"
+        );
+        assert_eq!(bare_name("Иван Франко"), "Иван Франко");
+        assert_eq!(
+            bare_name("Gall Anonim (Kronikarz)"),
+            "Gall Anonim (Kronikarz)"
+        );
     }
 
     #[test]

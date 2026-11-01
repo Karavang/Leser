@@ -113,26 +113,24 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
               </dd>
             </>
           )}
-          {book.publicBasis && !/^Q\d+ /.test(book.publicBasis) && (
+          {book.publicBasis && (
             <>
-              <dt>{t("license")}</dt>
-              <dd>{book.publicBasis}</dd>
-            </>
-          )}
-          {/^Q\d+ /.test(book.publicBasis ?? "") && (
-            <>
-              <dt>{t("publicDomain")}</dt>
+              <dt>{book.publicBasis.includes("†") ? t("publicDomain") : t("license")}</dt>
               <dd>
-                {book.publicBasis.split(", ").map((who) => (
-                  <a
-                    key={who}
-                    href={`https://www.wikidata.org/wiki/${who.split(" ")[0]}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >
-                    {who}{" "}
-                  </a>
-                ))}
+                {book.publicBasis.split(", ").map((who) =>
+                  /^Q\d+ /.test(who) ? (
+                    <a
+                      key={who}
+                      href={`https://www.wikidata.org/wiki/${who.split(" ")[0]}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      {who}{" "}
+                    </a>
+                  ) : (
+                    <span key={who}>{who} </span>
+                  ),
+                )}
               </dd>
             </>
           )}
