@@ -8,7 +8,7 @@ use crate::{
     AppError, Result,
 };
 
-async fn json<T: DeserializeOwned>(
+pub(crate) async fn json<T: DeserializeOwned>(
     client: &reqwest::Client,
     url: &str,
     query: &[(&str, &str)],
@@ -25,7 +25,7 @@ async fn json<T: DeserializeOwned>(
         .map_err(AppError::internal)
 }
 
-async fn text(client: &reqwest::Client, url: &str, query: &[(&str, &str)]) -> Result<String> {
+pub(crate) async fn text(client: &reqwest::Client, url: &str, query: &[(&str, &str)]) -> Result<String> {
     client
         .get(url)
         .query(query)
@@ -342,6 +342,39 @@ fn cyrillic(q: &str) -> bool {
     q.chars().any(|c| matches!(c, '\u{0400}'..='\u{04ff}'))
 }
 
+fn ws_langs(q: &str) -> &'static [&'static str] {
+    let has = |lo: char, hi: char| q.chars().any(|c| (lo..=hi).contains(&c));
+    if cyrillic(q) {
+        &["ru", "uk", "be", "bg", "sr"]
+    } else if has('\u{3040}', '\u{30ff}') {
+        &["ja"]
+    } else if has('\u{ac00}', '\u{d7af}') {
+        &["ko"]
+    } else if has('\u{4e00}', '\u{9fff}') {
+        &["zh", "ja"]
+    } else if has('\u{0370}', '\u{03ff}') {
+        &["el"]
+    } else if has('\u{0590}', '\u{05ff}') {
+        &["he"]
+    } else if has('\u{0600}', '\u{06ff}') {
+        &["ar", "fa"]
+    } else if has('\u{0530}', '\u{058f}') {
+        &["hy"]
+    } else if has('\u{10a0}', '\u{10ff}') {
+        &["ka"]
+    } else if has('\u{0900}', '\u{097f}') {
+        &["hi"]
+    } else if has('\u{0980}', '\u{09ff}') {
+        &["bn"]
+    } else if has('\u{0b80}', '\u{0bff}') {
+        &["ta"]
+    } else if has('\u{0e00}', '\u{0e7f}') {
+        &["th"]
+    } else {
+        &["en", "de", "pl", "fr", "es", "it", "pt", "cs", "nl", "sv", "la"]
+    }
+}
+
 #[derive(Deserialize, Default)]
 struct WsAnswer {
     #[serde(default)]
@@ -478,18 +511,18 @@ pub fn ws_export(lang: &str, page: &str) -> String {
 }
 
 // ponytail: languages are picked by the query's script, and the calls run one after another,
-// as the Wikimedia robot policy asks of unauthenticated clients.
+// as the Wikimedia robot policy asks of unauthenticated clients; whatever has not answered
+// within WS_BUDGET is left out, so the Latin list beyond the first few languages is best effort.
+const WS_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+
 pub async fn wikisource(client: &reqwest::Client, q: &str) -> Result<Vec<Found>> {
-    let langs: &[&str] = if cyrillic(q) {
-        &["ru", "uk"]
-    } else {
-        &["en", "de", "pl"]
-    };
+    let deadline = tokio::time::Instant::now() + WS_BUDGET;
     let mut lists = Vec::new();
-    for lang in langs {
-        match wikisource_in(client, lang, q).await {
-            Ok(found) => lists.push(found),
-            Err(e) => tracing::warn!("источник wikisource {lang} не ответил: {e}"),
+    for lang in ws_langs(q) {
+        match tokio::time::timeout_at(deadline, wikisource_in(client, lang, q)).await {
+            Ok(Ok(found)) => lists.push(found),
+            Ok(Err(e)) => tracing::warn!("источник wikisource {lang} не ответил: {e}"),
+            Err(_) => break,
         }
     }
     Ok(crate::sources::interleave(lists))
@@ -807,6 +840,7 @@ pub async fn describe(client: &reqwest::Client, url: &reqwest::Url) -> Described
                 basis: Some("TextGrid Repository, CC BY 3.0 DE (Editura / zeno.org)".into()),
             }
         }
+        Some("dracor.org" | "raw.githubusercontent.com") => crate::corpora::describe(client, url).await,
         _ => Described::default(),
     }
 }
@@ -937,7 +971,23 @@ mod tests {
 
     #[test]
     fn script_picks_the_wikisource_languages() {
-        assert!(cyrillic("Кайдашева"));
-        assert!(!cyrillic("Lalka"));
+        assert_eq!(ws_langs("Кайдашева")[..3], ["ru", "uk", "be"]);
+        assert_eq!(ws_langs("Lalka")[0], "en");
+        assert_eq!(ws_langs("吾輩は猫である"), ["ja"]);
+        assert_eq!(ws_langs("紅樓夢"), ["zh", "ja"]);
+        assert_eq!(ws_langs("Ὀδύσσεια"), ["el"]);
+    }
+
+    #[tokio::test]
+    #[ignore = "goes to wikisource"]
+    async fn live_wikisource_answers_in_time() {
+        let client = crate::sources::client().unwrap();
+        for q in ["Новая зямля", "Кобзар", "吾輩は猫である", "Οδύσσεια", "Les Misérables", "Don Quijote"] {
+            let at = std::time::Instant::now();
+            let found = wikisource(&client, q).await.unwrap();
+            let langs: Vec<_> = found.iter().filter_map(|f| f.lang.clone()).collect();
+            println!("{q}: {} за {:?} {langs:?}", found.len(), at.elapsed());
+            assert!(at.elapsed() < std::time::Duration::from_secs(9));
+        }
     }
 }

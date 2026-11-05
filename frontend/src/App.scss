@@ -1647,6 +1647,12 @@ li {
     white-space: pre-line; // аннотация приходит с переводами строк
   }
 
+  .detailsNote {
+    margin: 0 0 16px;
+    font-size: 0.875rem;
+    color: var(--dim);
+  }
+
   .detailsActions {
     display: flex;
     flex-wrap: wrap;

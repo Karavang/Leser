@@ -13,7 +13,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 # rustls, а не native-tls: тот же стек, что у sqlx, и в distroless-образе
 # не нужен ни openssl, ни системные сертификаты.
 reqwest = { version = "0.12", default-features = false, features = [
-    "rustls-tls-webpki-roots", "json", "charset",
+    "rustls-tls-webpki-roots", "json", "charset", "gzip",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

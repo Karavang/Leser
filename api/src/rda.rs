@@ -264,7 +264,7 @@ fn paragraphs(chapter: &str) -> Vec<&str> {
 
 /// Собирает из глав fb2 — формат, который здесь уже умеют и читать, и искать.
 /// Название берётся из имени файла: внутри `.rda` его нет, там только данные.
-pub fn to_fb2(title: &str, chapters: &[String]) -> String {
+pub fn to_fb2(title: &str, note: &str, chapters: &[String]) -> String {
     let esc = |s: &str| {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
@@ -280,7 +280,7 @@ pub fn to_fb2(title: &str, chapters: &[String]) -> String {
     );
     out.push_str(&esc(title));
     out.push_str("</book-title>\n  <annotation><p>");
-    out.push_str(&format!("Собрано из .rda, глав: {}", chapters.len()));
+    out.push_str(&esc(note));
     out.push_str("</p></annotation>\n </title-info></description>\n <body>\n");
 
     for (i, chapter) in chapters.iter().enumerate() {
@@ -379,6 +379,7 @@ mod tests {
     fn produced_fb2_parses_back() {
         let fb2 = to_fb2(
             "Philosophers Stone & Co",
+            "",
             &["THE BOY WHO LIVED\nMr. Dursley был <нормальным>".to_string()],
         );
         let meta = crate::parse::parse_fb2(fb2.as_bytes()).unwrap();
@@ -401,7 +402,7 @@ mod tests {
             ]
         );
 
-        let fb2 = to_fb2("Philosophers Stone", &[chapter.to_string()]);
+        let fb2 = to_fb2("Philosophers Stone", "", &[chapter.to_string()]);
         // название главы взято из первого абзаца, а не «Глава 1»
         assert!(fb2.contains("<title><p>THE BOY WHO LIVED</p></title>"));
         // и в теле оно не повторяется
@@ -410,7 +411,7 @@ mod tests {
 
         // длинный первый абзац — это уже текст, глава просто нумеруется
         let long = "а".repeat(200);
-        let fb2 = to_fb2("t", &[long]);
+        let fb2 = to_fb2("t", "", &[long]);
         assert!(fb2.contains("<title><p>Глава 1</p></title>"));
     }
 }

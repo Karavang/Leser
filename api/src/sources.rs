@@ -28,6 +28,7 @@ const ALLOWED_HOSTS: &[&str] = &[
     "wolnelektury.pl",
     "ws-export.wmcloud.org",
     "textgridlab.org",
+    "dracor.org",
 ];
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -85,11 +86,12 @@ pub struct Found {
 /// Опрашивает источники параллельно. Упавший источник — это ноль его книг,
 /// а не ошибка всего поиска: Gutenberg лежит, GitHub всё равно отвечает.
 pub async fn search(client: &reqwest::Client, q: &str, github_token: Option<&str>) -> Vec<Found> {
-    let (wolne, wikisource, gutenberg, textgrid, github) = tokio::join!(
+    let (wolne, wikisource, gutenberg, textgrid, corpora, github) = tokio::join!(
         patient(crate::open::wolnelektury(client, q)),
         patient(crate::open::wikisource(client, q)),
         patient(gutenberg(client, q)),
         patient(crate::open::textgrid(client, q)),
+        patient(crate::corpora::search(client, q)),
         patient(github(client, q, github_token)),
     );
     let lists = [
@@ -97,6 +99,7 @@ pub async fn search(client: &reqwest::Client, q: &str, github_token: Option<&str
         ("wikisource", wikisource),
         ("gutenberg", gutenberg),
         ("textgrid", textgrid),
+        ("eltec/dracor", corpora),
         ("github", github),
     ]
     .into_iter()

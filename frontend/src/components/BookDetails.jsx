@@ -1,3 +1,4 @@
+import axios from "axios";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { canOffline, download, downloadedIds } from "../offline";
@@ -33,6 +34,21 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
       setSaved(have.has(String(book.id)) ? "done" : null),
     );
   }, [book.id]);
+
+  const [stored, setStored] = useState(null);
+
+  const store = async () => {
+    setStored("busy");
+    const auth = { headers: { Authorization: `Bearer ${JSON.parse(localStorage.getItem("token"))}` } };
+    try {
+      while ((await axios.post(`/api/store/${book.id}`, null, auth)).status === 202) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+      }
+      setStored("done");
+    } catch (e) {
+      setStored(e.response?.data?.message ?? t("downloadFailed"));
+    }
+  };
 
   const save = () => {
     setSaved("busy");
@@ -143,10 +159,18 @@ export const BookDetails = ({ book, onClose, onDelete, onShelf, onPublic }) => {
         </dl>
 
         {book.desc && <p className="detailsDesc">{book.desc}</p>}
+        {book.linked && stored !== "done" && <p className="detailsNote">{t("linkedNote")}</p>}
+        {stored === "busy" && <p className="detailsNote">{t("importAudioWait")}</p>}
+        {stored && !["busy", "done"].includes(stored) && <p className="error">{stored}</p>}
 
         <div className="detailsActions">
           <button onClick={() => ref.current.close()}>{t("close")}</button>
-          {canOffline && (
+          {book.linked && book.public && stored !== "done" && (
+            <button onClick={store} disabled={stored === "busy"}>
+              {stored === "busy" ? t("downloading") : t("storeHere")}
+            </button>
+          )}
+          {canOffline && !(book.linked && stored !== "done") && (
             <button
               onClick={save}
               disabled={saved === "busy" || saved === "done"}

@@ -14,6 +14,7 @@ mod admin;
 mod audio;
 mod auth;
 mod books;
+mod corpora;
 mod enrich;
 mod images;
 mod legal;
@@ -28,6 +29,7 @@ mod search;
 mod seed;
 mod sources;
 mod tags;
+mod tei;
 mod tts;
 
 // ponytail: Cloudflare rejects request bodies over 100 MB on the free plan, so file uploads cap at 90 MiB.
@@ -275,6 +277,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .route("/searchAudio", get(audio::search))
         .route("/importAudio", post(audio::import))
+        .route("/store/{filename}", post(audio::store))
         .route("/searchSources", get(books::search_sources))
         .route("/import", post(books::import))
         .route("/registration", post(auth::registration))

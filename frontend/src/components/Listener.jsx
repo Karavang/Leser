@@ -326,6 +326,7 @@ export const Listener = () => {
 
   const onError = () => {
     if (!audio.current?.error || !media) return;
+    if (tracks[track]?.url) return setError(t("sourceDown"));
     if (retried.current || isOffline()) return setError(t("playFailed"));
     retried.current = true;
     seekTo.current = time;
@@ -569,7 +570,8 @@ export const Listener = () => {
 
       <audio
         ref={audio}
-        src={`/api/audio/${id}/${track}?t=${media}`}
+        src={tracks[track]?.url ?? `/api/audio/${id}/${track}?t=${media}`}
+        referrerPolicy="no-referrer"
         preload="auto"
         onLoadedMetadata={onLoaded}
         onTimeUpdate={onTime}

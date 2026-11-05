@@ -42,6 +42,7 @@ pub struct Book {
     public: bool,
     public_basis: Option<String>,
     seconds: Option<f64>,
+    linked: bool,
 }
 
 /// Форматы, которые вообще принимаются. Тот же список стоит в `accept`
@@ -54,14 +55,15 @@ pub struct Book {
 /// Чего здесь нет намеренно: `djvu` — это сканы, а не текст, и без djvulibre
 /// из них не достать даже слоя OCR; `kfx` — закрытый формат Amazon, который
 /// в живой природе всегда под DRM. Обоим место в `TODO.md`, а не здесь.
-pub const BOOK_EXTS: [&str; 9] = [
-    "epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html", "rda",
+pub const BOOK_EXTS: [&str; 10] = [
+    "epub", "fb2", "mobi", "azw3", "pdf", "txt", "md", "html", "rda", "xml",
 ];
 
 const BOOK_COLS: &str = "b.id, b.title, b.author, b.published, b.lang, b.description, b.series, b.series_index, b.genres,
      b.ext, b.owner_id, b.source_url, b.created_at, u.username as added_by,
      (s.user_id is not null) as on_shelf, p.updated_at as read_at, p.position as read_pos, b.public, b.public_basis,
-     (select sum(t.seconds)::float8 from audio_tracks t where t.book_id = b.id) as seconds";
+     (select sum(t.seconds)::float8 from audio_tracks t where t.book_id = b.id) as seconds,
+     exists (select 1 from audio_tracks t where t.book_id = b.id and t.url is not null) as linked";
 /// `$1` — всегда читатель, который спрашивает: от него зависит и полка.
 const BOOK_FROM: &str = "from books b
      left join users u on u.id = b.owner_id
@@ -180,6 +182,7 @@ impl Book {
             "publicBasis": self.public_basis,
             "canPublish": user.admin,
             "seconds": self.seconds,
+            "linked": self.linked,
         })
     }
 }
@@ -575,6 +578,7 @@ fn book_ext(name: &str) -> Result<String> {
         "htm" | "xhtml" => "html".to_string(),
         "markdown" | "mdown" => "md".to_string(),
         "azw" => "mobi".to_string(),
+        "tei" => "xml".to_string(),
         _ => ext,
     };
     if !BOOK_EXTS.contains(&ext.as_str()) {
@@ -609,7 +613,12 @@ async fn store_book(
     let (ext, bytes) = if ext == "rda" {
         let chapters = crate::rda::chapters(&bytes)?;
         let title = title_from_filename(name);
-        let fb2 = crate::rda::to_fb2(&title, &chapters);
+        let fb2 = crate::rda::to_fb2(&title, &format!("Собрано из .rda, глав: {}", chapters.len()), &chapters);
+        ("fb2", axum::body::Bytes::from(fb2))
+    } else if ext == "xml" {
+        let tei = crate::tei::read(&bytes)?;
+        let title = tei.title.unwrap_or_else(|| title_from_filename(name));
+        let fb2 = crate::rda::to_fb2(&title, "TEI", &tei.chapters);
         ("fb2", axum::body::Bytes::from(fb2))
     } else {
         (ext, bytes)
@@ -996,7 +1005,11 @@ pub(crate) async fn fetch_into_library(
 
     // Расширение берём из адреса; окончательно решает всё равно разбор файла.
     // Адрес вида /ebooks/2554.epub3.images расширения не содержит — там epub.
-    let ext = book_ext(url.path()).unwrap_or_else(|_| "epub".into());
+    let ext = if crate::corpora::is_tei(&url) {
+        "xml".into()
+    } else {
+        book_ext(url.path()).unwrap_or_else(|_| "epub".into())
+    };
 
     let described = crate::open::describe(&state.http, &url).await;
     let response = state
@@ -1239,6 +1252,7 @@ mod tests {
             public: false,
             public_basis: None,
             seconds: None,
+            linked: false,
         };
         let user = |admin| AuthUser {
             id: me,

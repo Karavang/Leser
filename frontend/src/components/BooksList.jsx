@@ -166,6 +166,7 @@ export const BooksList = ({ books, kind = "library", searching = false, onDelete
                           <path d="M4 18v-6a8 8 0 0 1 16 0v6M4 14h3v6H4zM17 14h3v6h-3z" />
                         </svg>
                         {book.seconds > 0 && t("hoursMinutes", ...hoursMinutes(book.seconds))}
+                        {book.linked && ` · ${t("linkedShort")}`}
                       </span>
                     )}
                     {(isEnter === book.id || !HOVER) && (

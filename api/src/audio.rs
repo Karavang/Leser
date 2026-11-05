@@ -508,17 +508,18 @@ pub async fn listen(
             .fetch_optional(&state.db)
             .await?;
     let (title, author, lang) = head.ok_or_else(not_found)?;
-    let tracks: Vec<(String, String, f32, i64, String)> = sqlx::query_as(
-        "select title, mime, seconds, size, chapters from audio_tracks where book_id = $1 order by idx",
+    let tracks: Vec<(String, String, f32, i64, String, Option<String>)> = sqlx::query_as(
+        "select title, mime, seconds, size, chapters, url from audio_tracks where book_id = $1 order by idx",
     )
     .bind(id)
     .fetch_all(&state.db)
     .await?;
     let tracks: Vec<serde_json::Value> = tracks
         .into_iter()
-        .map(|(title, mime, seconds, size, chapters)| {
+        .map(|(title, mime, seconds, size, chapters, url)| {
             serde_json::json!({
                 "title": title,
+                "url": url,
                 "mime": mime,
                 "seconds": seconds,
                 "size": size,
@@ -580,7 +581,7 @@ pub async fn stream(
         ));
     }
     let row: Option<(Uuid, String, i64)> =
-        sqlx::query_as("select id, mime, size from audio_tracks where book_id = $1 and idx = $2")
+        sqlx::query_as("select id, mime, size from audio_tracks where book_id = $1 and idx = $2 and url is null")
             .bind(id)
             .bind(idx)
             .fetch_optional(&state.db)
@@ -655,12 +656,12 @@ pub async fn search(
     Json(crate::sources::search_audio(&state.http, q).await)
 }
 
-// ponytail: LibriVox imports in flight (false) and failed ones (true) live in process memory;
-// a restart forgets them, and abandoned staged tracks are swept a day later like any unfinished upload.
-static IMPORTS: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+// ponytail: books being stored (false) and failed stores (true) live in process memory;
+// a restart forgets them, and the next press of "store" starts over.
+static STORING: Mutex<Option<HashMap<Uuid, bool>>> = Mutex::new(None);
 
-fn imports<T>(f: impl FnOnce(&mut HashMap<String, bool>) -> T) -> T {
-    f(IMPORTS.lock().unwrap().get_or_insert_with(HashMap::new))
+fn storing<T>(f: impl FnOnce(&mut HashMap<Uuid, bool>) -> T) -> T {
+    f(STORING.lock().unwrap().get_or_insert_with(HashMap::new))
 }
 
 #[derive(Deserialize)]
@@ -672,33 +673,13 @@ pub async fn import(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
     Json(body): Json<ImportAudio>,
-) -> Result<(StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>> {
     let Some((from, key)) = origin(&body.id) else {
         return Err(AppError::bad(
             "Неверный адрес книги",
             "Invalid book address",
         ));
     };
-    let id = format!("{from}:{key}");
-    let pending = || {
-        Ok((
-            StatusCode::ACCEPTED,
-            Json(serde_json::json!({ "pending": true })),
-        ))
-    };
-    match imports(|m| m.get(&id).cloned()) {
-        Some(false) => return pending(),
-        Some(true) => {
-            imports(|m| m.remove(&id));
-            return Err(AppError::new(
-                StatusCode::BAD_GATEWAY,
-                "Не удалось скачать книгу из источника, попробуйте ещё раз",
-                "Could not download the book from its source, try again",
-            ));
-        }
-        None => {}
-    }
-
     let book = match from {
         "wl" => crate::open::wolnelektury_book(&state.http, key).await,
         _ => crate::sources::librivox_book(&state.http, key).await,
@@ -722,42 +703,173 @@ pub async fn import(
             .bind(found)
             .execute(&state.db)
             .await?;
-        return Ok((
-            StatusCode::OK,
-            Json(serde_json::json!({ "location": found })),
-        ));
+        return Ok(Json(serde_json::json!({ "location": found })));
     }
 
-    if book.sections.is_empty()
-        || book.sections.len() > MAX_TRACKS
-        || book.sections.iter().any(|s| {
-            !s.url
-                .parse()
-                .is_ok_and(|u| crate::sources::host_allowed(&u))
-        })
-    {
+    if !linkable(&book.sections) {
         return Err(AppError::bad(
-            "У этой книги нет файлов, которые можно забрать",
-            "This book has no files that can be fetched",
+            "У этой книги нет файлов, которые можно слушать",
+            "This book has no files that can be played",
         ));
     }
-    if imports(|m| m.insert(id.clone(), false).is_none()) {
+    let id = link(&state, user.id, &book).await?;
+    if book.basis.is_none() {
+        tokio::spawn(crate::legal::check(state.clone(), id));
+    }
+    Ok(Json(serde_json::json!({ "location": id })))
+}
+
+fn linkable(sections: &[crate::sources::Section]) -> bool {
+    !sections.is_empty()
+        && sections.len() <= MAX_TRACKS
+        && sections.iter().all(|s| {
+            s.seconds > 0.0
+                && s.seconds < MAX_SECONDS
+                && s.url
+                    .parse()
+                    .is_ok_and(|u| crate::sources::host_allowed(&u))
+        })
+}
+
+fn meta_of(book: &crate::sources::Audiobook) -> Meta {
+    Meta {
+        title: book.title.clone(),
+        author: book.author.clone(),
+        lang: book.lang.clone(),
+        description: book.description.clone(),
+        ..Default::default()
+    }
+    .sanitized()
+}
+
+async fn link(state: &AppState, owner: Uuid, book: &crate::sources::Audiobook) -> Result<Uuid> {
+    let mut staged = Vec::with_capacity(book.sections.len());
+    for s in &book.sections {
+        let title = crate::parse::clean(&s.title, 300);
+        let (id,): (Uuid,) = sqlx::query_as(
+            "insert into audio_tracks (owner_id, title, mime, seconds, size, url)
+             values ($1, $2, 'audio/mpeg', $3, 0, $4) returning id",
+        )
+        .bind(owner)
+        .bind(&title)
+        .bind(s.seconds as f32)
+        .bind(&s.url)
+        .fetch_one(&state.db)
+        .await?;
+        staged.push(Staged {
+            id,
+            title,
+            seconds: s.seconds,
+            chapters: Vec::new(),
+        });
+    }
+    create(
+        state,
+        Some(owner),
+        &staged,
+        meta_of(book),
+        Some(&book.page_url),
+        book.basis.as_deref(),
+        book.basis.is_some(),
+    )
+    .await
+}
+
+// ponytail: a copy is kept only of a public book, that is one whose text the source or legal.rs found free;
+// both audio sources so far release their recordings freely (LibriVox: public domain, Wolne Lektury: Free Art
+// License / CC BY-SA), add a per-source copy flag when a source brings recordings that may only be linked.
+pub async fn store(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(filename): Path<String>,
+) -> Result<(StatusCode, Json<serde_json::Value>)> {
+    let (id, _) = crate::books::parse_filename(&filename)?;
+    crate::books::ensure_visible(&state.db, &user, id).await?;
+    let row: Option<(bool,)> = sqlx::query_as("select public from books where id = $1 and ext = $2")
+        .bind(id)
+        .bind(EXT)
+        .fetch_optional(&state.db)
+        .await?;
+    let (public,) = row.ok_or_else(not_found)?;
+    if !public {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "Хранить копию нельзя: не подтверждено, что книга свободна",
+            "A copy cannot be kept: the book is not confirmed to be free",
+        ));
+    }
+    let pending = || {
+        Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({ "pending": true })),
+        ))
+    };
+    match storing(|m| m.get(&id).copied()) {
+        Some(false) => return pending(),
+        Some(true) => {
+            storing(|m| m.remove(&id));
+            return Err(AppError::new(
+                StatusCode::BAD_GATEWAY,
+                "Не удалось скачать книгу из источника, попробуйте ещё раз",
+                "Could not download the book from its source, try again",
+            ));
+        }
+        None => {}
+    }
+    let tracks: Vec<(Uuid, String)> = sqlx::query_as(
+        "select id, url from audio_tracks where book_id = $1 and url is not null order by idx",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    if tracks.is_empty() {
+        return Ok((StatusCode::OK, Json(serde_json::json!({ "location": id }))));
+    }
+    if storing(|m| m.insert(id, false).is_none()) {
         tokio::spawn(async move {
-            match fetch(&state, Some(user.id), &book).await {
-                Ok(book_id) => {
-                    imports(|m| m.remove(&id));
-                    if book.basis.is_none() {
-                        crate::legal::check(state.clone(), book_id).await;
-                    }
+            match keep(&state, &tracks).await {
+                Ok(()) => {
+                    storing(|m| m.remove(&id));
                 }
                 Err(e) => {
-                    tracing::warn!("audio import {id}: {e}");
-                    imports(|m| m.insert(id, true));
+                    tracing::warn!("audio store {id}: {e}");
+                    storing(|m| m.insert(id, true));
                 }
-            };
+            }
         });
     }
     pending()
+}
+
+async fn keep(state: &AppState, tracks: &[(Uuid, String)]) -> Result<()> {
+    let ids: Vec<Uuid> = tracks.iter().map(|t| t.0).collect();
+    let drop_chunks = || {
+        sqlx::query("delete from audio_chunks where track_id = any($1)")
+            .bind(&ids)
+            .execute(&state.db)
+    };
+    drop_chunks().await?;
+    let result: Result<()> = async {
+        let mut sizes = Vec::with_capacity(tracks.len());
+        for (id, url) in tracks {
+            sizes.push(pull(state, *id, url).await?);
+        }
+        let mut tx = state.db.begin().await?;
+        for ((id, _), size) in tracks.iter().zip(sizes) {
+            sqlx::query("update audio_tracks set url = null, size = $2 where id = $1")
+                .bind(id)
+                .bind(size as i64)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        drop_chunks().await?;
+    }
+    result
 }
 
 pub fn origin(id: &str) -> Option<(&'static str, &str)> {
@@ -801,19 +913,11 @@ async fn fetch(
         for s in &book.sections {
             staged.push(download(state, owner, s).await?);
         }
-        let meta = Meta {
-            title: book.title.clone(),
-            author: book.author.clone(),
-            lang: book.lang.clone(),
-            description: book.description.clone(),
-            ..Default::default()
-        }
-        .sanitized();
         create(
             state,
             owner,
             &staged,
-            meta,
+            meta_of(book),
             Some(&book.page_url),
             book.basis.as_deref(),
             book.basis.is_some(),
@@ -961,6 +1065,23 @@ mod tests {
         ] {
             assert_eq!(origin(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn only_known_hosts_with_durations_are_linked() {
+        let s = |url: &str, seconds: f64| crate::sources::Section {
+            title: "1".into(),
+            url: url.into(),
+            seconds,
+        };
+        assert!(linkable(&[s("https://wolnelektury.pl/media/book/mp3/a.mp3", 60.0)]));
+        assert!(!linkable(&[]));
+        assert!(!linkable(&[s("https://evil.com/a.mp3", 60.0)]));
+        assert!(!linkable(&[s("http://wolnelektury.pl/a.mp3", 60.0)]));
+        assert!(!linkable(&[
+            s("https://archive.org/download/x/1.mp3", 60.0),
+            s("https://archive.org/download/x/2.mp3", 0.0),
+        ]));
     }
 
     #[test]
