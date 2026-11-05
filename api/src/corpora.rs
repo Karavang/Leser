@@ -74,7 +74,11 @@ async fn works(client: &reqwest::Client) -> Arc<Vec<Work>> {
     }
     let year = this_year();
     let (eltec, dracor) = tokio::join!(
-        futures_util::future::join_all(ELTEC.iter().map(|&(repo, lang)| eltec(client, repo, lang, year))),
+        futures_util::future::join_all(
+            ELTEC
+                .iter()
+                .map(|&(repo, lang)| eltec(client, repo, lang, year))
+        ),
         dracor(client),
     );
     let mut complete = dracor.is_ok();
@@ -116,7 +120,9 @@ fn eltec_rows(tsv: &str, repo: &str, lang: &str, year: i32) -> Vec<Work> {
     let mut lines = tsv.lines();
     let head: Vec<&str> = lines.next().unwrap_or_default().split('\t').collect();
     let col = |name: &str| head.iter().position(|h| *h == name);
-    let (Some(file), Some(author), Some(title)) = (col("filename"), col("author-name"), col("title")) else {
+    let (Some(file), Some(author), Some(title)) =
+        (col("filename"), col("author-name"), col("title"))
+    else {
         return Vec::new();
     };
     let death = col("author-death");
@@ -210,25 +216,40 @@ async fn dracor(client: &reqwest::Client) -> Result<Vec<Work>> {
             .iter()
             .find(|(c, _)| c == corpus)
             .map(|(_, l)| l.to_string());
-        out.extend(plays.plays.into_iter().filter(|p| crate::open::wl_slug(&p.name)).map(|p| {
-            let author = p
-                .authors
-                .iter()
-                .map(|a| a.fullname.clone().unwrap_or_else(|| person(&a.name)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let english = p.authors.iter().filter_map(|a| a.fullname_en.as_deref()).collect::<Vec<_>>().join(" ");
-            Work {
-                hay: format!("{} {} {author} {english}", p.title, p.title_en.as_deref().unwrap_or_default()),
-                page_url: format!("https://dracor.org/{corpus}/{}", p.name),
-                download_url: format!("{DRACOR}/corpora/{corpus}/plays/{}/tei", p.name),
-                title: p.title,
-                author,
-                lang: lang.clone(),
-                source: "DraCor",
-                basis: None,
-            }
-        }));
+        out.extend(
+            plays
+                .plays
+                .into_iter()
+                .filter(|p| crate::open::wl_slug(&p.name))
+                .map(|p| {
+                    let author = p
+                        .authors
+                        .iter()
+                        .map(|a| a.fullname.clone().unwrap_or_else(|| person(&a.name)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let english = p
+                        .authors
+                        .iter()
+                        .filter_map(|a| a.fullname_en.as_deref())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    Work {
+                        hay: format!(
+                            "{} {} {author} {english}",
+                            p.title,
+                            p.title_en.as_deref().unwrap_or_default()
+                        ),
+                        page_url: format!("https://dracor.org/{corpus}/{}", p.name),
+                        download_url: format!("{DRACOR}/corpora/{corpus}/plays/{}/tei", p.name),
+                        title: p.title,
+                        author,
+                        lang: lang.clone(),
+                        source: "DraCor",
+                        basis: None,
+                    }
+                }),
+        );
     }
     Ok(out)
 }
@@ -282,7 +303,10 @@ mod tests {
         let rows = eltec_rows(tsv, "ukr", "uk", 2026);
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0].author, "Григорій Квітка-Основ'яненко");
-        assert_eq!(rows[0].basis.as_deref(), Some("ELTeC: Григорій Квітка-Основ'яненко † 1843"));
+        assert_eq!(
+            rows[0].basis.as_deref(),
+            Some("ELTeC: Григорій Квітка-Основ'яненко † 1843")
+        );
         assert_eq!(
             rows[0].download_url,
             "https://raw.githubusercontent.com/COST-ELTeC/ELTeC-ukr/HEAD/level1/UKR18411_KvitkaSerdeshnaOksana.xml"
@@ -311,12 +335,26 @@ mod tests {
             let first = found.first().unwrap_or_else(|| panic!("nothing for {q}"));
             let url: reqwest::Url = first.download_url.parse().unwrap();
             assert!(crate::sources::host_allowed(&url));
-            let bytes = client.get(url.clone()).send().await.unwrap().bytes().await.unwrap();
+            let bytes = client
+                .get(url.clone())
+                .send()
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap();
             let tei = crate::tei::read(&bytes).unwrap();
             let fb2 = crate::rda::to_fb2(tei.title.as_deref().unwrap_or(q), "TEI", &tei.chapters);
             crate::parse::parse_fb2(fb2.as_bytes()).unwrap();
             let d = describe(&client, &url).await;
-            println!("{q}: {} — {} [{}] {} глав, {:?}", first.title, first.author, first.source, tei.chapters.len(), d.basis);
+            println!(
+                "{q}: {} — {} [{}] {} глав, {:?}",
+                first.title,
+                first.author,
+                first.source,
+                tei.chapters.len(),
+                d.basis
+            );
         }
     }
 }

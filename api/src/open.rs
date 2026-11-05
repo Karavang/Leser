@@ -25,7 +25,11 @@ pub(crate) async fn json<T: DeserializeOwned>(
         .map_err(AppError::internal)
 }
 
-pub(crate) async fn text(client: &reqwest::Client, url: &str, query: &[(&str, &str)]) -> Result<String> {
+pub(crate) async fn text(
+    client: &reqwest::Client,
+    url: &str,
+    query: &[(&str, &str)],
+) -> Result<String> {
     client
         .get(url)
         .query(query)
@@ -371,7 +375,9 @@ fn ws_langs(q: &str) -> &'static [&'static str] {
     } else if has('\u{0e00}', '\u{0e7f}') {
         &["th"]
     } else {
-        &["en", "de", "pl", "fr", "es", "it", "pt", "cs", "nl", "sv", "la"]
+        &[
+            "en", "de", "pl", "fr", "es", "it", "pt", "cs", "nl", "sv", "la",
+        ]
     }
 }
 
@@ -840,7 +846,9 @@ pub async fn describe(client: &reqwest::Client, url: &reqwest::Url) -> Described
                 basis: Some("TextGrid Repository, CC BY 3.0 DE (Editura / zeno.org)".into()),
             }
         }
-        Some("dracor.org" | "raw.githubusercontent.com") => crate::corpora::describe(client, url).await,
+        Some("dracor.org" | "raw.githubusercontent.com") => {
+            crate::corpora::describe(client, url).await
+        }
         _ => Described::default(),
     }
 }
@@ -982,7 +990,14 @@ mod tests {
     #[ignore = "goes to wikisource"]
     async fn live_wikisource_answers_in_time() {
         let client = crate::sources::client().unwrap();
-        for q in ["Новая зямля", "Кобзар", "吾輩は猫である", "Οδύσσεια", "Les Misérables", "Don Quijote"] {
+        for q in [
+            "Новая зямля",
+            "Кобзар",
+            "吾輩は猫である",
+            "Οδύσσεια",
+            "Les Misérables",
+            "Don Quijote",
+        ] {
             let at = std::time::Instant::now();
             let found = wikisource(&client, q).await.unwrap();
             let langs: Vec<_> = found.iter().filter_map(|f| f.lang.clone()).collect();

@@ -613,7 +613,11 @@ async fn store_book(
     let (ext, bytes) = if ext == "rda" {
         let chapters = crate::rda::chapters(&bytes)?;
         let title = title_from_filename(name);
-        let fb2 = crate::rda::to_fb2(&title, &format!("Собрано из .rda, глав: {}", chapters.len()), &chapters);
+        let fb2 = crate::rda::to_fb2(
+            &title,
+            &format!("Собрано из .rda, глав: {}", chapters.len()),
+            &chapters,
+        );
         ("fb2", axum::body::Bytes::from(fb2))
     } else if ext == "xml" {
         let tei = crate::tei::read(&bytes)?;

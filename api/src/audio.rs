@@ -580,12 +580,13 @@ pub async fn stream(
             "Not authorized",
         ));
     }
-    let row: Option<(Uuid, String, i64)> =
-        sqlx::query_as("select id, mime, size from audio_tracks where book_id = $1 and idx = $2 and url is null")
-            .bind(id)
-            .bind(idx)
-            .fetch_optional(&state.db)
-            .await?;
+    let row: Option<(Uuid, String, i64)> = sqlx::query_as(
+        "select id, mime, size from audio_tracks where book_id = $1 and idx = $2 and url is null",
+    )
+    .bind(id)
+    .bind(idx)
+    .fetch_optional(&state.db)
+    .await?;
     let (track, mime, size) = row.ok_or_else(not_found)?;
     let size = size as u64;
 
@@ -785,11 +786,12 @@ pub async fn store(
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
     let (id, _) = crate::books::parse_filename(&filename)?;
     crate::books::ensure_visible(&state.db, &user, id).await?;
-    let row: Option<(bool,)> = sqlx::query_as("select public from books where id = $1 and ext = $2")
-        .bind(id)
-        .bind(EXT)
-        .fetch_optional(&state.db)
-        .await?;
+    let row: Option<(bool,)> =
+        sqlx::query_as("select public from books where id = $1 and ext = $2")
+            .bind(id)
+            .bind(EXT)
+            .fetch_optional(&state.db)
+            .await?;
     let (public,) = row.ok_or_else(not_found)?;
     if !public {
         return Err(AppError::new(
@@ -1074,7 +1076,10 @@ mod tests {
             url: url.into(),
             seconds,
         };
-        assert!(linkable(&[s("https://wolnelektury.pl/media/book/mp3/a.mp3", 60.0)]));
+        assert!(linkable(&[s(
+            "https://wolnelektury.pl/media/book/mp3/a.mp3",
+            60.0
+        )]));
         assert!(!linkable(&[]));
         assert!(!linkable(&[s("https://evil.com/a.mp3", 60.0)]));
         assert!(!linkable(&[s("http://wolnelektury.pl/a.mp3", 60.0)]));

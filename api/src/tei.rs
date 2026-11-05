@@ -3,8 +3,22 @@ use quick_xml::events::Event;
 use crate::{AppError, Result};
 
 const BLOCKS: [&[u8]; 16] = [
-    b"p", b"l", b"head", b"stage", b"speaker", b"titlePart", b"ab", b"castItem", b"item",
-    b"docAuthor", b"byline", b"dateline", b"salute", b"signed", b"trailer", b"opener",
+    b"p",
+    b"l",
+    b"head",
+    b"stage",
+    b"speaker",
+    b"titlePart",
+    b"ab",
+    b"castItem",
+    b"item",
+    b"docAuthor",
+    b"byline",
+    b"dateline",
+    b"salute",
+    b"signed",
+    b"trailer",
+    b"opener",
 ];
 const SKIP: [&[u8]; 4] = [b"note", b"teiHeader", b"standOff", b"figDesc"];
 
@@ -28,7 +42,10 @@ pub fn read(xml: &[u8]) -> Result<Tei> {
 
     loop {
         let event = reader.read_event_into(&mut buf).map_err(|e| {
-            AppError::bad(format!("Не удалось прочитать TEI: {e}"), format!("Could not read TEI: {e}"))
+            AppError::bad(
+                format!("Не удалось прочитать TEI: {e}"),
+                format!("Could not read TEI: {e}"),
+            )
         })?;
         match event {
             Event::Start(e) => {
